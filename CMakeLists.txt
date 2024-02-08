@@ -18,7 +18,7 @@ INCLUDE_DIRECTORIES(${qhullDir}/include/libqhull_r)
 LINK_DIRECTORIES(${qhullDir}/lib)
 SET(qhullLibs qhullcpp qhull_r)
 
-INCLUDE_DIRECTORIES(include include/urquhart)
+INCLUDE_DIRECTORIES(include include/urquhart include/sim)
 
 catkin_package(
    INCLUDE_DIRS
@@ -39,7 +39,18 @@ add_executable(UrquhartExample
     src/matching.cpp  
     )
 
+add_executable(ForestSim
+    src/path.cpp
+    src/observation.cpp  
+    src/tree.cpp  
+    src/descriptor.cpp
+    src/matching.cpp  
+    )
+
 target_include_directories(UrquhartExample PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
 target_link_libraries(UrquhartExample PUBLIC ${catkin_LIBRARIES} ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs})
-SET_TARGET_PROPERTIES(UrquhartExample PROPERTIES
- COMPILE_DEFINITIONS "qh_QHpointer")
+SET_TARGET_PROPERTIES(UrquhartExample PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
+
+target_include_directories(ForestSim PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
+target_link_libraries(ForestSim PUBLIC ${catkin_LIBRARIES} ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs})
+SET_TARGET_PROPERTIES(ForestSim PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
