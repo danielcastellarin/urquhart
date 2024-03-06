@@ -42,14 +42,14 @@ add_executable(UrquhartExample
     )
 
 add_executable(ForestSim
-    src/path.cpp
-    src/observation.cpp  
-    src/tree.cpp  
+    src/old/path.cpp
+    src/observation.cpp
+    src/tree.cpp
     src/descriptor.cpp
-    src/matching.cpp  
+    src/matching.cpp
     )
 
-add_executable(CreateForest src/poisson_disk_sampling.cpp)
+add_executable(CreateForest src/old/poisson_disk_sampling.cpp)
 
 add_executable(Homog src/homography.cpp)
 

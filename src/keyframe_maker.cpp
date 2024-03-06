@@ -19,6 +19,7 @@
 
 
 /*
+    vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
     For every n individual frames, construct a keyframe K (using the following customized local bundle adjustment steps) (NOTE: n should be chosen based on the robot's speed and observation range, such that sequential keyframes exhibit partial overlap for the observed landmarks)
         For each individual frame (a set of 2D landmarks given as input), construct the local geometric hierarchy (triangulation, polygons, etc.)
             Perform data association with the previous frame, ideally making enough links between the landmarks in each frame
@@ -26,7 +27,8 @@
         Once enough associations have been made for the current individual frame, perform RANSAC and estimate the current position of the robot
         After all n frames have been processed, approximate the true positions of each landmark w.r.t. the fixed reference point (the location of the robot in either the first or last individual frame)
         At this point, keyframe K should consist of a robot pose, a set of 2D landmark positions, and a newly constructed geometric hierarchy for the finalized positions of the landmarks (throw away everything else)
-    
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
     Using the geometric hierarchy from keyframe K, perform point association with the global geometric hierarchy
         Maybe use the current odometry estimate from the global map to restrict the number of global polygons that would be eligible for matching with the local keyframe polygons
         If not enough matches are made, then the search space could incrementally expand to include more polygons. if this is too complicated, then we could just query all the global polygons and call it a day
@@ -127,12 +129,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg)
 }
 
 
-
 // TODO implement keyframe width parameter (default should be 5)
-
-/**
- * This tutorial demonstrates simple sending of messages over the ROS system.
- */
 int main(int argc, char **argv)
 {
     // Initialize Node and read in private parameters
@@ -142,7 +139,6 @@ int main(int argc, char **argv)
     // cfg.outputConfig(std::cout);
     // ros::Rate pub_rate(cfg.pubRate);    // 10Hz by default
 
-    pcl::PointCloud<pcl::PointXY> localPC;
     ros::Subscriber sub = n.subscribe("local_points", 10, parse2DPC);
 
     ros::spin();
