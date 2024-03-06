@@ -7,6 +7,8 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   std_msgs
   roscpp
+  pcl_conversions
+  pcl_ros
 )
 
 find_package(OpenCV REQUIRED)
@@ -46,6 +48,15 @@ add_executable(ForestSim
     src/descriptor.cpp
     src/matching.cpp  
     )
+
+add_executable(CreateForest src/poisson_disk_sampling.cpp)
+
+add_executable(Homog src/homography.cpp)
+
+include_directories(include ${catkin_INCLUDE_DIRS})
+
+add_executable(ultimate_path src/ultimate_path.cpp)
+target_link_libraries(ultimate_path ${catkin_LIBRARIES})
 
 target_include_directories(UrquhartExample PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
 target_link_libraries(UrquhartExample PUBLIC ${catkin_LIBRARIES} ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs})
