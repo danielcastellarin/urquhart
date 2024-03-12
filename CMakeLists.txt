@@ -17,6 +17,10 @@ find_package(Boost REQUIRED)
 SET(qhullDir "/usr/local/")
 INCLUDE_DIRECTORIES(${qhullDir}/include/libqhullcpp)
 INCLUDE_DIRECTORIES(${qhullDir}/include/libqhull_r)
+# SET(qhullDir "/home/drc3203/thirdparty/qhull-2020.2/")
+# SET(qhullDir "/home/drc3203/thirdparty/qhull/")
+# INCLUDE_DIRECTORIES(${qhullDir}/src/libqhullcpp)
+# INCLUDE_DIRECTORIES(${qhullDir}/src/libqhull_r)
 LINK_DIRECTORIES(${qhullDir}/lib)
 SET(qhullLibs qhullcpp qhull_r)
 
@@ -58,10 +62,22 @@ include_directories(include ${catkin_INCLUDE_DIRS})
 add_executable(ultimate_path src/ultimate_path.cpp)
 target_link_libraries(ultimate_path ${catkin_LIBRARIES})
 
+add_executable(KeyframeGen
+    src/keyframe_maker.cpp
+    src/observation.cpp
+    src/tree.cpp
+    src/descriptor.cpp
+    src/matching.cpp
+    )
+target_include_directories(KeyframeGen PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
+target_link_libraries(KeyframeGen PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
+SET_TARGET_PROPERTIES(KeyframeGen PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
+
 target_include_directories(UrquhartExample PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
-target_link_libraries(UrquhartExample PUBLIC ${catkin_LIBRARIES} ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs})
+# target_link_libraries(UrquhartExample PUBLIC ${catkin_LIBRARIES} ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs})
+target_link_libraries(UrquhartExample PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
 SET_TARGET_PROPERTIES(UrquhartExample PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
 
 target_include_directories(ForestSim PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
-target_link_libraries(ForestSim PUBLIC ${catkin_LIBRARIES} ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs})
+target_link_libraries(ForestSim PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
 SET_TARGET_PROPERTIES(ForestSim PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")

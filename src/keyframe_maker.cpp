@@ -14,6 +14,7 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/common/transforms.h>
 #include <sensor_msgs/PointCloud2.h>
 
 
@@ -49,17 +50,29 @@
 
 */
 
-std::vector<urquhart::Observation> kfObservations;
-std::vector<pcl::PointCloud<pcl::PointXY>> pcTransformed;
-std::vector<std::map<pcl::PointXY, pcl::PointXY>> obsToTfMap;
-// TODO store tf matrix to get from the most recent observation in the keyframe back to the first observation
-//      by default, this should be the identity matrix
 
-// store dictionary of landmark locations across observations relative to the first frame
-//      k=landmark id, v=((x,y), #frames observed in) 
-std::map<int, std::pair<pcl::PointXY, int>> kfTreeDict;
-std::map<std::pair<int, pcl::PointXY>, int> ii;     // inverted index to find which dict element should be updated after successful association
-int landmarkIdx = 0;
+ros::Publisher kfpub;
+ros::Publisher ogfpub;
+
+void publishKeyFrame(const pcl::PointCloud<pcl::PointXY>& kfPoints, int seqID, std::string frameName) {
+    sensor_msgs::PointCloud2 pc2_msg;
+    pcl::toROSMsg(kfPoints, pc2_msg);
+    pc2_msg.header.frame_id = frameName;
+    pc2_msg.header.stamp = ros::Time::now();
+    pc2_msg.header.seq = seqID;
+    kfpub.publish(pc2_msg);
+}
+
+void publishOgFrameSet(const pcl::PointCloud<pcl::PointXY>& ogPoints, int seqID, std::string frameName) {
+    sensor_msgs::PointCloud2 pc2_msg;
+    pcl::toROSMsg(ogPoints, pc2_msg);
+    pc2_msg.header.frame_id = frameName;
+    pc2_msg.header.stamp = ros::Time::now();
+    pc2_msg.header.seq = seqID;
+    ogfpub.publish(pc2_msg);
+}
+
+
 
 pcl::PointXY pclConvert(vecPtT p) {
     pcl::PointXY myPoint;
@@ -72,188 +85,77 @@ pcl::PointXY sumPoints(pcl::PointXY p1, pcl::PointXY p2) {
     return summedPoint;
 }
 
-
-// void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg)
-// {
-//     // Take the points from the PointCloud2 message
-//     pcl::PointCloud<pcl::PointXY> localCloud;
-    
-//     pcl::fromROSMsg(*cloudMsg, localCloud);
-//     int frameID = cloudMsg->header.seq;     // Do I need this?
-
-//     // Construct a PointVector for the given tree positions
-//     PointVector vectorOfTrees;
-//     for(const auto& p : localCloud) vectorOfTrees.push_back(std::vector<double>{p.x, p.y});
-//     urquhart::Observation obs(vectorOfTrees);
-    
-//     // For now, I'm going to assume that the fixed reference frame of the keyframe will be taken from the first frame  
-//     if (kfObservations.empty()) {
-//         // Add geometric hierarchy to this keyframe's record and store the positions of the observed landmarks
-//         kfObservations.push_back(obs);
-//         pcTransformed.push_back(localCloud);
-//         for (const auto& p : localCloud) {
-//             ii.insert({{kfObservations.size(), p}, ++landmarkIdx});
-//             kfTreeDict.insert({landmarkIdx, {p, 1}});
-//         }
-//     } else {
-//         // Store set of individual points in current frame that have been matched across previous frames 
-//         std::map<pcl::PointXY, int> thisObsMatches;
-//         std::vector<std::pair<pcl::PointXY, pcl::PointXY>> matchesToPrevious;
-//         std::set<size_t> uniqueLandmarkMatches;
-
-//         // TODO: loop over each preceeding frames if not enough landmarks have been matched in the current frame (THIS MIGHT DEPEND ON FOREST DENSITY?...)
-//         int numMatchesIWant = localCloud.size()/2, obsIdx = 0;
-//         while (thisObsMatches.size() < numMatchesIWant && ++obsIdx > kfObservations.size()) {
-//             std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
-//             auto& prevObs = kfObservations.end()[-obsIdx];   // use negative index
-
-//             // Polygon Matching
-//             std::vector<size_t> refIds = obs.H->get_children(0), targIds = prevObs.H->get_children(0);
-//             matching::polygonMatching(obs, refIds, prevObs, targIds, 5, polygonMatches);
-
-//             // Triangle Matching
-//             for (auto pMatch : polygonMatches) {    // FIXME? make the loop explicitly over constant references?
-//                 refIds = obs.H->get_children(pMatch.first);
-//                 targIds = prevObs.H->get_children(pMatch.second);
-//                 // TODO FROM URQ: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-//                 matching::polygonMatching(obs, refIds, prevObs, targIds, 5, triangleMatches);
-//             }
-
-//             // Point Matching
-//             for (auto tMatch : triangleMatches) {   // FIXME? make the loop explicitly over constant references?
-//                 urquhart::Polygon refTriangle = obs.H->get_vertex(tMatch.first), targetTriangle = prevObs.H->get_vertex(tMatch.second);
-//                 std::vector<size_t> chi = {0, 1, 2}, bestPermutation;
-
-//                 // TODO change the edgeLengths to do squared distance instead of euclidean distance (unnecessary square root)
-
-//                 // Permute the edges to find the best match between the triangles
-//                 double bestDist = 1000000;
-//                 do {
-//                     double d = euclideanDistance(refTriangle.edgeLengths, std::vector<double>{targetTriangle.edgeLengths[chi[0]], targetTriangle.edgeLengths[chi[1]], targetTriangle.edgeLengths[chi[2]]});
-//                     if (d < bestDist) {
-//                         bestDist = d;
-//                         bestPermutation = chi;
-//                     }
-//                 } while (std::next_permutation(chi.begin(), chi.end()));
-
-//                 // Match the corresponding vertices using the best permutation obtained above
-//                 // Specifically, the vertices across from the matched edges (invariant to vertex ordering of the convex hull)
-//                 for (size_t i = 0; i < 3; ++i) {
-//                     int refIdx = (i+2)%3, targetIdx = (bestPermutation[i]+2)%3;
-//                     pcl::PointXY refPoint = pclConvert(refTriangle.points[refIdx]), targetPoint = pclConvert(targetTriangle.points[targetIdx]);
-//                     std::pair<int, pcl::PointXY> refPointKey = {frameID, refPoint};
-//                     // size_t idx = cantorPairing(refTriangle.edges[refIdx].first, targetTriangle.edges[targetIdx].first);   // todo change ids for target vertices to use the ids from II
-//                     // if (ii.find({frameID, refPoint}) == ii.end()) {
-//                     //     std::pair<int, pcl::PointXY> targetPointKey = {kfObservations.size()-obsIdx, pclConvert(targetTriangle.points[(bestPermutation[i]+2)%3])};
-//                     //     int existingLandmarkId = ii[targetPointKey];
-//                     //     ii[refPointKey] = existingLandmarkId;
-//                     //     thisObsMatches[refPoint] = existingLandmarkId;
-//                     //     // .insert({existingLandmarkId, {}})
-//                     // }
-//                     int existingLandmarkId = ii[{kfObservations.size()-obsIdx, targetPoint}];
-//                     size_t idx = cantorPairing(refTriangle.edges[refIdx].first, existingLandmarkId);
-//                     // if (ii.find({frameID, refPoint}) == ii.end()) {
-//                     if (uniqueLandmarkMatches.find(idx) == uniqueLandmarkMatches.end()) {
-//                         // ii[refPointKey] = existingLandmarkId;        // TODO
-//                         thisObsMatches[refPoint] = existingLandmarkId;
-//                         // matchesToPrevious.push_back({refPoint, pclConvert(targetTriangle.points[(bestPermutation[i]+2)%3])});
-//                         // .insert({existingLandmarkId, {}})
-//                         uniqueLandmarkMatches.insert(idx);
-//                     }
-//                     // if (unique_matches.find(idx) == unique_matches.end()) {
-//                     //     vecPtT pA = refTriangle.points[refIdx];
-//                     //     vecPtT pB = targetTriangle.points[targetIdx];
-//                     //     pointMatches.push_back(std::make_pair(pA, pB));     // TODO use thisObsMatches instead
-//                     //     unique_matches.insert(idx);                         //   "
-//                     // }
-//                 }
-//             }
-//         }
-
-//         // Now add the geometric hierarchy to the record
-//         kfObservations.push_back(obs);
-
-//         // TODO call homography for the pairs of matched points
-//         // get the transform between this frame and the previous
-
-//         // TODO multiply existing matrix with the newly computed one to get the tf from this frame to the first
-//         // 3T0 = 3T2 (from above) 2T0 (og)
-
-//         // TODO for each landmark (id, pos) in the latest observation:
-//             // apply that full transform to get its position relative to the first frame
-//             // if ID not in dictionary, put it in with count=1
-//             // else, sum pos with whatever is in there, increment count 
-//     }
-
-//     // Finalize keyframe, send it to global code / backend for processing, then reset keyframe data structures
-//     int n = 5; // TODO get this value from a param
-//     if (kfObservations.size() >= n) {
-//         // TODO if only raw points in ref plane, cluster then to create trees? <--- need to be CERTAIN that extra trees are not being created
-
-//         // TODO for each landmark, divide summed position by #times it was observed
-//         //      copy them (or something)
-//         // TODO if any landmarks are within a CERTAIN THRESHOLD OF EACH OTHER, combine them
-
-//         // send the keyframe (set of 2D positions of landmarks) to the backend
-//         // (For now, I will expect the backend to do create the geometric hierarchy once it arrives)
-
-//         kfObservations.clear();
-//         // set matrix back to the identity matrix
-//         // clear dictionary
-//     }
-// }
-
+// Substituted for original for type compatibility with my code
 void myPolygonMatching(
     const urquhart::Observation &ref, std::vector<size_t> refIds,
     const urquhart::Observation &targ, std::vector<size_t> targIds, double thresh,
-    std::vector<std::pair<size_t, size_t>> &polygonMatches)
-{
-
+    std::vector<std::pair<size_t, size_t>> &polygonMatches) {
     std::set<size_t> matched;
-    for (auto rIdx : refIds)
-    {
-        size_t bestMatch = 0;
-        size_t bestDist = 100000;
+    for (auto rIdx : refIds) {
+        size_t bestMatch = 0, bestDist = 100000;
         urquhart::Polygon rp = ref.H->get_vertex(rIdx);
-        for (auto tIdx : targIds)
-        {
+        for (auto tIdx : targIds) {
             urquhart::Polygon tp = targ.H->get_vertex(tIdx);
             // if tIdx was not matched before and the difference of number of points is not larger than 5
             if (matched.find(tIdx) == matched.end() &&
                 std::abs(int(rp.points.size() - tp.points.size())) <= 3)
             {
                 double d = euclideanDistance(rp.descriptor, tp.descriptor);
-                if (d < bestDist)
-                {
+                if (d < bestDist) {
                     bestDist = d;
                     bestMatch = tIdx;
                 }
             }
         }
 
-        if (bestDist < thresh)
-        {
+        if (bestDist < thresh) {
             matched.insert(bestMatch);
-            std::pair<size_t, size_t> m = std::make_pair(rIdx, bestMatch);
-            polygonMatches.push_back(m);
+            polygonMatches.push_back({rIdx, bestMatch});
         }
     }
 }
 
+// Observations are not associated when tf is not initialized
 struct ObsRecord {
     int frameId;
     urquhart::Observation obs;
-    pcl::PointCloud<pcl::PointXY> cloud;
-    Eigen::Matrix3f tf;
+    pcl::PointCloud<pcl::PointXY> cloud, baseCloud;
+    // Eigen::Matrix3f tf;
+    Eigen::Matrix4f tf;
     ObsRecord(int id, PointVector pv, pcl::PointCloud<pcl::PointXY> pc) : frameId(id), obs(pv), cloud(pc) {}
     bool operator==(const ObsRecord &other) const{ return frameId == other.frameId; }
+    bool operator<(const ObsRecord &other) const{ return frameId < other.frameId; }
 };
 
-// bool obsSorter(ObsRecord const& a, ObsRecord const& b) {
-//     return a.frameId < b.frameId;
-// }
+// first values are points from reference frame, second values are points from target frame
+Eigen::Matrix4f computeRigid2DEuclidTf(std::vector<std::pair<pcl::PointXY, pcl::PointXY>> pointPairs) {
+    Eigen::MatrixXf A(pointPairs.size()+pointPairs.size(), 4);
+    Eigen::VectorXf b(pointPairs.size()+pointPairs.size());
 
-std::vector<std::pair<pcl::PointXY, pcl::PointXY>> matchObs(const urquhart::Observation &ref, const urquhart::Observation &targ, double thresh) {
+    // https://math.stackexchange.com/questions/77462/finding-transformation-matrix-between-two-2d-coordinate-frames-pixel-plane-to
+    int startRow = 0;
+    for (auto& [refP, targP] : pointPairs) {
+        A.row(startRow)   = (Eigen::Vector4f() << refP.x, -refP.y, 1, 0).finished().transpose();
+        A.row(startRow+1) = (Eigen::Vector4f() << refP.y,  refP.x, 0, 1).finished().transpose();
+        b[startRow]   = targP.x;
+        b[startRow+1] = targP.y;
+        startRow += 2;
+    }
+
+    // https://www.cs.cmu.edu/~16385/s17/Slides/10.1_2D_Alignment__LLS.pdf <-- slide 24
+    // x = (A^T A)^-1 A^T b
+    Eigen::Vector4f x = (A.transpose() * A).inverse() * A.transpose() * b;
+
+    // Return the 4x4 matrix to transform frames: reference --> target
+    Eigen::Matrix4f tf;
+    tf << x[0], -x[1], 0, x[2],
+          x[1],  x[0], 0, x[3],
+             0,     0, 1,    0,
+             0,     0, 0,    1;
+    return tf;
+}
+
+std::vector<std::pair<pcl::PointXY, pcl::PointXY>> matchObs(const urquhart::Observation &ref, const urquhart::Observation &targ, double polyMatchThresh, double validPointMatchThresh) {
     std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
     // std::vector<std::pair<vecPtT, vecPtT>> pointMatches;
     std::vector<std::pair<pcl::PointXY, pcl::PointXY>> vertexMatches;
@@ -262,14 +164,14 @@ std::vector<std::pair<pcl::PointXY, pcl::PointXY>> matchObs(const urquhart::Obse
     // Polygon Matching (Level 2)
     // std::vector<size_t> refIds = ref.H->get_children(0), targIds = targ.H->get_children(0);
     // matching::polygonMatching(ref, ref.H->get_children(0), targ, targ.H->get_children(0), thresh, polygonMatches);
-    myPolygonMatching(ref, ref.H->get_children(0), targ, targ.H->get_children(0), thresh, polygonMatches);
+    myPolygonMatching(ref, ref.H->get_children(0), targ, targ.H->get_children(0), polyMatchThresh, polygonMatches);
 
     // Triangle Matching (Level 1)
     for (auto pMatch : polygonMatches) {
         // refIds = ref.H->get_children(pMatch.first), targIds = targ.H->get_children(pMatch.second);
         // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
         // matching::polygonMatching(ref, ref.H->get_children(pMatch.first), targ, targ.H->get_children(pMatch.second), thresh, triangleMatches);
-        myPolygonMatching(ref, ref.H->get_children(pMatch.first), targ, targ.H->get_children(pMatch.second), thresh, triangleMatches);
+        myPolygonMatching(ref, ref.H->get_children(pMatch.first), targ, targ.H->get_children(pMatch.second), polyMatchThresh, triangleMatches);
     }
 
     // Vertex Matching (Level 0)
@@ -299,15 +201,36 @@ std::vector<std::pair<pcl::PointXY, pcl::PointXY>> matchObs(const urquhart::Obse
         }
     }
 
+    // Post-process: double-check matches, remove any where pairs are not certain distance from each other
+    for (auto iter = vertexMatches.begin(); iter != vertexMatches.end(); ++iter) {
+        if (std::abs(iter->first.x - iter->second.x) > validPointMatchThresh || std::abs(iter->first.y - iter->second.y) > validPointMatchThresh)
+            vertexMatches.erase(iter);
+    }
+    // arrogance check: if matched points across differential observations are not very close, then the match is probably wrong 
+
     return vertexMatches;
 }
 
-// std::vector<urquhart::Observation> kfObservations, unassociatedObs;
-// std::vector<std::pair<urquhart::Observation, pcl::PointCloud<pcl::PointXY>>> kfObservations, unassociatedObs;
-// std::vector<pcl::PointCloud<pcl::PointXY>> ogPointClouds;
-// int baseFrameIdx = 0;
+
 std::vector<ObsRecord> unassociatedObs;
 std::set<ObsRecord> kfObs;
+
+void tfCloud(Eigen::Matrix4f existingTfToBase, Eigen::Matrix4f refToTargTf, ObsRecord& obsRec) {
+    Eigen::Matrix4f fullTfToBase = refToTargTf * existingTfToBase;
+    // std::cout << "Frame " << obsRec.frameId << " TF to base:\n" << fullTfToBase << std::endl;
+
+    // Temporarily convert the pointcloud to 3D to transform into base frame 
+    pcl::PointCloud<pcl::PointXYZ> nonAssociatedCloud, newlyAssociatedCloud;
+    pcl::copyPointCloud(obsRec.cloud, nonAssociatedCloud);
+    pcl::transformPointCloud(nonAssociatedCloud, newlyAssociatedCloud, fullTfToBase);
+
+    // Return the pointcloud to 2D and store it in the frame's observation along with its TF
+    pcl::copyPointCloud(newlyAssociatedCloud, obsRec.baseCloud);
+    obsRec.tf = fullTfToBase;
+
+    // TODO Add tfcloud to association network?
+    kfObs.insert(obsRec);
+}
 
 void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     // Take the points from the PointCloud2 message
@@ -316,77 +239,73 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
     // Construct a PointVector for the given tree positions
     PointVector vectorOfTrees;
-    for(const auto& p : localCloud) vectorOfTrees.push_back(std::vector<double>{p.x, p.y});
+    for (const auto& p : localCloud) vectorOfTrees.push_back(std::vector<double>{p.x, p.y});
     ObsRecord myObs(cloudMsg->header.seq, vectorOfTrees, localCloud);
 
+    // Try to match the current frame with any that have been associated with a base frame
     if (!kfObs.empty()) {
-        auto revKfIter = kfObs.rbegin();
         std::vector<std::pair<pcl::PointXY, pcl::PointXY>> pointMatches;
+        std::cout << "Matching frame " << myObs.frameId << " with associated clouds." << std::endl;
         
         // Match (current frame --> associated frame) until match found
+        auto revKfIter = kfObs.rbegin();
         do {
-            pointMatches = matchObs(myObs.obs, revKfIter->obs, 5);
-            // TODO maybe ransac validate with available point matches here before leaving loop?
-        } while (pointMatches.empty() && ++revKfIter != kfObs.rend());
+            pointMatches = matchObs(myObs.obs, revKfIter->obs, 5, 1.5);
+        } while (pointMatches.size() < 2 && ++revKfIter != kfObs.rend());
 
         // Store observation data
-        if (pointMatches.empty()) unassociatedObs.push_back(myObs);
-        else {
-            // TODO maybe get tf before leaving loop
-            // use point matches to estimate transform from current frame into previous
-            // use forward kinematics to compute full tf to base frame (new tf * other obs's tf = full tf)
-            // assign that tf to myObs.tf
-            // apply tf to myObs.cloud (inplace)
-            kfObs.insert(myObs);
+        if (pointMatches.size() < 2) { unassociatedObs.push_back(myObs); std::cout << "No matches found." << std::endl;
+        } else {
+            // Estimate tf from reference to target frame (assuming we have gotten rid of outliers already)
+            std::cout << "Found match with frame " << revKfIter->frameId << ", adding it to the end of the associated clouds." << std::endl;
+            tfCloud(revKfIter->tf, computeRigid2DEuclidTf(pointMatches), myObs);
 
+            // Try to match all unassociated observations with the current observation
             auto obsIter = unassociatedObs.begin();
-            while(obsIter != unassociatedObs.end()) {
-                auto pointMatches = matchObs(obsIter->obs, myObs.obs, 5);
-                if (!pointMatches.empty()) {
-                    // use point matches to estimate transform from unassociated frame into current frame
-                    // use forward kinematics to compute full tf to base frame (new tf * myObs tf = full tf)
-                    // assign that tf to obsIter->tf
-                    // apply tf to obsIter->cloud (inplace)
-                    kfObs.insert(*obsIter);
+            while (obsIter != unassociatedObs.end()) {
+                pointMatches = matchObs(obsIter->obs, myObs.obs, 5, 1.5);
+                if (pointMatches.size() >= 2) {
+                    std::cout << "Also matched with frame " << obsIter->frameId << std::endl;
+                    tfCloud(myObs.tf, computeRigid2DEuclidTf(pointMatches), *obsIter);
                     obsIter = unassociatedObs.erase(obsIter);
                 }
                 else ++obsIter;
             }
         }
-    } else if (!unassociatedObs.empty()) {
-        auto revIter = unassociatedObs.rbegin();
-        std::vector<std::pair<pcl::PointXY, pcl::PointXY>> pointMatches;
 
-        // Match (current frame --> unassociated frame) until match found
+    } else if (!unassociatedObs.empty()) {  // Try to match the current frame with any unassociated frames
+        std::vector<std::pair<pcl::PointXY, pcl::PointXY>> pointMatches;
+        std::cout << "Trying to find base frame for frame " << myObs.frameId << std::endl;
+
+        // Match (current frame --> latest unassociated frame) until match found
+        auto revIter = unassociatedObs.rbegin();
         do {
-            pointMatches = matchObs(myObs.obs, revIter->obs, 5);
-            // TODO maybe ransac validate with available point matches here before leaving loop?
-        } while (pointMatches.empty() && ++revIter != unassociatedObs.rend());
+            pointMatches = matchObs(myObs.obs, revIter->obs, 5, 1.5);
+        } while (pointMatches.size() < 2 && ++revIter != unassociatedObs.rend());
 
         // Store observation data
-        if (pointMatches.empty()) unassociatedObs.push_back(myObs);
-        else {
+        if (pointMatches.size() < 2) { unassociatedObs.push_back(myObs); std::cout << "None found." << std::endl;
+        } else {
+            // Assign the target frame of this match as the base of the keyframe
+            revIter->tf = Eigen::Matrix4f::Identity();    
+            revIter->baseCloud = revIter->cloud;
             kfObs.insert(*revIter);
-            // TODO set *revIter.tf to identity matrix 
-            
-            // TODO maybe get tf before leaving loop
-            // use point matches to estimate transform from current frame into previous
-            // use forward kinematics to compute full tf to base frame (new tf * other obs's tf = full tf)
-            // assign that tf to myObs.tf
-            // apply tf to myObs.cloud (inplace)
-            kfObs.insert(myObs);
-            unassociatedObs.erase(std::next(revIter).base());   // iter should not move
 
-            // For every remaining unassociated obs: match with the current obs
-            while(revIter != unassociatedObs.rend()) {
-                auto pointMatches = matchObs(revIter->obs, myObs.obs, 5);
-                if(!pointMatches.empty()) {
-                    // use point matches to estimate transform from unassociated frame into current frame
-                    // use forward kinematics to compute full tf to base frame (new tf * myObs tf = full tf)
-                    // assign that tf to revIter->tf
-                    // apply tf to revIter->cloud (inplace)
-                    kfObs.insert(*revIter);
-                    unassociatedObs.erase(std::next(revIter).base()); // iter should not move
+            // Estimate tf from reference to target frame (assuming we have gotten rid of outliers already)
+            std::cout << "Base frame found at frame " << revIter->frameId << ", adding frame " << myObs.frameId << " behind it." << std::endl;
+            tfCloud(revIter->tf, computeRigid2DEuclidTf(pointMatches), myObs);
+            
+            // Remove the base frame from the unassociated list and advance the iterator
+            std::advance(revIter, 1);
+            unassociatedObs.erase(revIter.base());
+
+            // For every remaining unassociated observation, try to match with the current observation
+            while (revIter != unassociatedObs.rend()) {
+                pointMatches = matchObs(revIter->obs, myObs.obs, 5, 1.5);
+                if (pointMatches.size() >= 2) {
+                    std::cout << "Including frame " << revIter->frameId << " in the association." << std::endl;
+                    tfCloud(myObs.tf, computeRigid2DEuclidTf(pointMatches), *revIter);
+                    unassociatedObs.erase(std::next(revIter).base()); // iterator should not move
                 }
                 else ++revIter;
             }
@@ -394,136 +313,57 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     } else {
         // If this is the first observation, add it to the unassociated ones
         unassociatedObs.push_back(myObs);
+        std::cout << "Initializing unassociated observations at frame " << myObs.frameId << std::endl;
     }
-    
-    
 
-    // TODO postprocessing
-    // check size of kfObs to see if it is ready to be sent
-        // should also be sent if newer observations are not being associated, too
+    // std::cout << "Unassociated: ";
+    // for (auto g : unassociatedObs) {
+    //     std::cout << g.frameId << ", ";
+    // }
+    // std::cout << "\nKeyframe: ";
+    // for (auto g : kfObs) {
+    //     std::cout << g.frameId << ", ";
+    // }
+    // std::cout << std::endl;
+
+
+    // n = max #associated frames before sending, m = #unassociated frames before sending any associated
+    int n = 5, m = 3; // TODO get this value from a param
+    // If number of associated frames exceeds limit or there have been too many unassociated frames since one was associated:
+    if (kfObs.size() >= n || (!kfObs.empty() && kfObs.rbegin()->frameId + m <= cloudMsg->header.seq)) {
         // At this point, all pc in kfObs should be in the same reference frame
         // Combine them --> do standard clustering/point association
-            // TODO should timestamp of message be that of the base frame or whatever the current time is?
-        // send point cloud to graph construction
 
-    // check unassociated to see if any should be removed (old)
+        // TODO talk to Bailey about efficiently deriving the cluster centers out in either nlogn or linear time
+        
+        pcl::PointCloud<pcl::PointXY> bigPC, bigOgPC;
+        std::cout << "Keyframe with IDs ";
+        for (auto& bingo : kfObs) {
+            bigPC += bingo.baseCloud;
+            bigOgPC += bingo.cloud;
+            std::cout << bingo.frameId << "(" << bingo.baseCloud.size() << "), ";
+        }
+        std::cout << " sending..." << std::endl;
+        
+        // TODO should timestamp of message be that of the base frame or whatever the current time is?
+        publishKeyFrame(bigPC, kfObs.begin()->frameId, "sensor_frame");
+        publishOgFrameSet(bigOgPC, kfObs.begin()->frameId, "sensor_frame");
+        kfObs.clear();
+    }
+
+    // If an unassociated frame becomes too old before it can be associated, remove it
+    if (!unassociatedObs.empty() && unassociatedObs.front().frameId + m <= cloudMsg->header.seq) {
+        std::cout << "Deleting frame " << unassociatedObs.front().frameId << " from unassociated observations." << std::endl;
+        unassociatedObs.erase(unassociatedObs.begin());
+    }
+    std::cout << "===============================================================" << std::endl;
+    
 
     // if needing to debug...
     // I'm guessing I could estimate whether a pc was transformed correctly by checking pc similarity with the other pcs
         // I would imagine that the similarity value would be significantly bigger
         // https://stackoverflow.com/questions/55913968/metric-to-compare-two-point-clouds-similarity
 
-
-    
-    // OLD STUFF VVVVVVVVVVVVVVVV
-
-    // // For now, I'm going to assume that the fixed reference frame of the keyframe will be taken from the first frame  
-    // if (!kfObservations.empty()) {
-    //     // Store set of individual points in current frame that have been matched across previous frames 
-    //     std::map<pcl::PointXY, int> thisObsMatches;
-    //     std::vector<std::pair<pcl::PointXY, pcl::PointXY>> matchesToPrevious;
-    //     std::set<size_t> uniqueLandmarkMatches;
-
-    //     // TODO: loop over each preceeding frames if not enough landmarks have been matched in the current frame (THIS MIGHT DEPEND ON FOREST DENSITY?...)
-    //     int numMatchesIWant = localCloud.size()/2, obsIdx = 0;
-    //     while (thisObsMatches.size() < numMatchesIWant && ++obsIdx > kfObservations.size()) {
-    //         std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
-    //         auto& prevObs = kfObservations.end()[-obsIdx];   // use negative index
-
-    //         // Polygon Matching
-    //         std::vector<size_t> refIds = obs.H->get_children(0), targIds = prevObs.H->get_children(0);
-    //         matching::polygonMatching(obs, refIds, prevObs, targIds, 5, polygonMatches);
-
-    //         // Triangle Matching
-    //         for (auto pMatch : polygonMatches) {    // FIXME? make the loop explicitly over constant references?
-    //             refIds = obs.H->get_children(pMatch.first);
-    //             targIds = prevObs.H->get_children(pMatch.second);
-    //             // TODO FROM URQ: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-    //             matching::polygonMatching(obs, refIds, prevObs, targIds, 5, triangleMatches);
-    //         }
-
-    //         // Point Matching
-    //         for (auto tMatch : triangleMatches) {   // FIXME? make the loop explicitly over constant references?
-    //             urquhart::Polygon refTriangle = obs.H->get_vertex(tMatch.first), targetTriangle = prevObs.H->get_vertex(tMatch.second);
-    //             std::vector<size_t> chi = {0, 1, 2}, bestPermutation;
-
-    //             // TODO change the edgeLengths to do squared distance instead of euclidean distance (unnecessary square root)
-
-    //             // Permute the edges to find the best match between the triangles
-    //             double bestDist = 1000000;
-    //             do {
-    //                 double d = euclideanDistance(refTriangle.edgeLengths, std::vector<double>{targetTriangle.edgeLengths[chi[0]], targetTriangle.edgeLengths[chi[1]], targetTriangle.edgeLengths[chi[2]]});
-    //                 if (d < bestDist) {
-    //                     bestDist = d;
-    //                     bestPermutation = chi;
-    //                 }
-    //             } while (std::next_permutation(chi.begin(), chi.end()));
-
-    //             // Match the corresponding vertices using the best permutation obtained above
-    //             // Specifically, the vertices across from the matched edges (invariant to vertex ordering of the convex hull)
-    //             for (size_t i = 0; i < 3; ++i) {
-    //                 int refIdx = (i+2)%3, targetIdx = (bestPermutation[i]+2)%3;
-    //                 pcl::PointXY refPoint = pclConvert(refTriangle.points[refIdx]), targetPoint = pclConvert(targetTriangle.points[targetIdx]);
-    //                 std::pair<int, pcl::PointXY> refPointKey = {frameID, refPoint};
-    //                 // size_t idx = cantorPairing(refTriangle.edges[refIdx].first, targetTriangle.edges[targetIdx].first);   // todo change ids for target vertices to use the ids from II
-    //                 // if (ii.find({frameID, refPoint}) == ii.end()) {
-    //                 //     std::pair<int, pcl::PointXY> targetPointKey = {kfObservations.size()-obsIdx, pclConvert(targetTriangle.points[(bestPermutation[i]+2)%3])};
-    //                 //     int existingLandmarkId = ii[targetPointKey];
-    //                 //     ii[refPointKey] = existingLandmarkId;
-    //                 //     thisObsMatches[refPoint] = existingLandmarkId;
-    //                 //     // .insert({existingLandmarkId, {}})
-    //                 // }
-    //                 int existingLandmarkId = ii[{kfObservations.size()-obsIdx, targetPoint}];
-    //                 size_t idx = cantorPairing(refTriangle.edges[refIdx].first, existingLandmarkId);
-    //                 // if (ii.find({frameID, refPoint}) == ii.end()) {
-    //                 if (uniqueLandmarkMatches.find(idx) == uniqueLandmarkMatches.end()) {
-    //                     // ii[refPointKey] = existingLandmarkId;        // TODO
-    //                     thisObsMatches[refPoint] = existingLandmarkId;
-    //                     // matchesToPrevious.push_back({refPoint, pclConvert(targetTriangle.points[(bestPermutation[i]+2)%3])});
-    //                     // .insert({existingLandmarkId, {}})
-    //                     uniqueLandmarkMatches.insert(idx);
-    //                 }
-    //                 // if (unique_matches.find(idx) == unique_matches.end()) {
-    //                 //     vecPtT pA = refTriangle.points[refIdx];
-    //                 //     vecPtT pB = targetTriangle.points[targetIdx];
-    //                 //     pointMatches.push_back(std::make_pair(pA, pB));     // TODO use thisObsMatches instead
-    //                 //     unique_matches.insert(idx);                         //   "
-    //                 // }
-    //             }
-    //         }
-    //     }
-
-    //     // Now add the geometric hierarchy to the record
-    //     // kfObservations.push_back(obs);
-
-    //     // TODO call homography for the pairs of matched points
-    //     // get the transform between this frame and the previous
-
-    //     // TODO multiply existing matrix with the newly computed one to get the tf from this frame to the first
-    //     // 3T0 = 3T2 (from above) 2T0 (og)
-
-    //     // TODO for each landmark (id, pos) in the latest observation:
-    //         // apply that full transform to get its position relative to the first frame
-    //         // if ID not in dictionary, put it in with count=1
-    //         // else, sum pos with whatever is in there, increment count 
-    // }
-
-    // // Finalize keyframe, send it to global code / backend for processing, then reset keyframe data structures
-    // int n = 5; // TODO get this value from a param
-    // if (kfObservations.size() >= n) {
-    //     // TODO if only raw points in ref plane, cluster then to create trees? <--- need to be CERTAIN that extra trees are not being created
-
-    //     // TODO for each landmark, divide summed position by #times it was observed
-    //     //      copy them (or something)
-    //     // TODO if any landmarks are within a CERTAIN THRESHOLD OF EACH OTHER, combine them
-
-    //     // send the keyframe (set of 2D positions of landmarks) to the backend
-    //     // (For now, I will expect the backend to do create the geometric hierarchy once it arrives)
-
-    //     kfObservations.clear();
-    //     // set matrix back to the identity matrix
-    //     // clear dictionary
-    // }
 }
 
 
@@ -536,7 +376,9 @@ int main(int argc, char **argv) {
     // cfg.outputConfig(std::cout);
     // ros::Rate pub_rate(cfg.pubRate);    // 10Hz by default
 
-    ros::Subscriber sub = n.subscribe("local_points", 10, parse2DPC);
+    ros::Subscriber sub = n.subscribe("/sim_path/local_points", 10, parse2DPC);
+    kfpub = n.advertise<sensor_msgs::PointCloud2>("keyframe", 10);
+    ogfpub = n.advertise<sensor_msgs::PointCloud2>("ogframe", 10);
 
     ros::spin();
 

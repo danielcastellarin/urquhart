@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+    <rosparam file="$(find urquhart)/run_configs/sim_path/need_a_win.yaml" command="load" />
+    <node pkg="urquhart" type="ultimate_path" name="sim_path" output="screen" />
+</launch>
