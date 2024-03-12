@@ -15,6 +15,8 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/common/transforms.h>
+#include <pcl/common/centroid.h>
+#include <pcl/segmentation/extract_clusters.h>
 #include <sensor_msgs/PointCloud2.h>
 
 
@@ -50,9 +52,22 @@
 
 */
 
+// Observations are not associated when tf is not initialized
+struct ObsRecord {
+    int frameId;
+    urquhart::Observation obs;
+    pcl::PointCloud<pcl::PointXY> cloud;
+    Eigen::Matrix4f tf;
+    ObsRecord(int id, PointVector pv, pcl::PointCloud<pcl::PointXY> pc) : frameId(id), obs(pv), cloud(pc) {}
+    bool operator==(const ObsRecord &other) const{ return frameId == other.frameId; }
+    bool operator<(const ObsRecord &other) const{ return frameId < other.frameId; }
+};
 
+pcl::PointCloud<pcl::PointXYZ>::Ptr bigPcPtr(new pcl::PointCloud<pcl::PointXYZ>());
 ros::Publisher kfpub;
-ros::Publisher ogfpub;
+
+std::vector<ObsRecord> unassociatedObs;
+std::set<ObsRecord> kfObs;
 
 void publishKeyFrame(const pcl::PointCloud<pcl::PointXY>& kfPoints, int seqID, std::string frameName) {
     sensor_msgs::PointCloud2 pc2_msg;
@@ -63,26 +78,24 @@ void publishKeyFrame(const pcl::PointCloud<pcl::PointXY>& kfPoints, int seqID, s
     kfpub.publish(pc2_msg);
 }
 
-void publishOgFrameSet(const pcl::PointCloud<pcl::PointXY>& ogPoints, int seqID, std::string frameName) {
-    sensor_msgs::PointCloud2 pc2_msg;
-    pcl::toROSMsg(ogPoints, pc2_msg);
-    pc2_msg.header.frame_id = frameName;
-    pc2_msg.header.stamp = ros::Time::now();
-    pc2_msg.header.seq = seqID;
-    ogfpub.publish(pc2_msg);
-}
-
-
+// void publishPc(const pcl::PointCloud<pcl::PointXY>& points, int seqID, std::string frameName, ros::Publisher& pub) {
+//     sensor_msgs::PointCloud2 pc2_msg;
+//     pcl::toROSMsg(points, pc2_msg);
+//     pc2_msg.header.frame_id = frameName;
+//     pc2_msg.header.stamp = ros::Time::now();
+//     pc2_msg.header.seq = seqID;
+//     pub.publish(pc2_msg);
+// }
 
 pcl::PointXY pclConvert(vecPtT p) {
     pcl::PointXY myPoint;
     myPoint.x = p[0]; myPoint.y = p[1];
     return myPoint;
 }
-pcl::PointXY sumPoints(pcl::PointXY p1, pcl::PointXY p2) {
-    pcl::PointXY summedPoint;
-    summedPoint.x = p1.x + p2.x; summedPoint.y = p1.y + p2.y;
-    return summedPoint;
+pcl::PointXY pclConvert(Eigen::Vector4f p) {
+    pcl::PointXY myPoint;
+    myPoint.x = p[0]; myPoint.y = p[1];
+    return myPoint;
 }
 
 // Substituted for original for type compatibility with my code
@@ -114,18 +127,6 @@ void myPolygonMatching(
         }
     }
 }
-
-// Observations are not associated when tf is not initialized
-struct ObsRecord {
-    int frameId;
-    urquhart::Observation obs;
-    pcl::PointCloud<pcl::PointXY> cloud, baseCloud;
-    // Eigen::Matrix3f tf;
-    Eigen::Matrix4f tf;
-    ObsRecord(int id, PointVector pv, pcl::PointCloud<pcl::PointXY> pc) : frameId(id), obs(pv), cloud(pc) {}
-    bool operator==(const ObsRecord &other) const{ return frameId == other.frameId; }
-    bool operator<(const ObsRecord &other) const{ return frameId < other.frameId; }
-};
 
 // first values are points from reference frame, second values are points from target frame
 Eigen::Matrix4f computeRigid2DEuclidTf(std::vector<std::pair<pcl::PointXY, pcl::PointXY>> pointPairs) {
@@ -211,10 +212,6 @@ std::vector<std::pair<pcl::PointXY, pcl::PointXY>> matchObs(const urquhart::Obse
     return vertexMatches;
 }
 
-
-std::vector<ObsRecord> unassociatedObs;
-std::set<ObsRecord> kfObs;
-
 void tfCloud(Eigen::Matrix4f existingTfToBase, Eigen::Matrix4f refToTargTf, ObsRecord& obsRec) {
     Eigen::Matrix4f fullTfToBase = refToTargTf * existingTfToBase;
     // std::cout << "Frame " << obsRec.frameId << " TF to base:\n" << fullTfToBase << std::endl;
@@ -224,11 +221,9 @@ void tfCloud(Eigen::Matrix4f existingTfToBase, Eigen::Matrix4f refToTargTf, ObsR
     pcl::copyPointCloud(obsRec.cloud, nonAssociatedCloud);
     pcl::transformPointCloud(nonAssociatedCloud, newlyAssociatedCloud, fullTfToBase);
 
-    // Return the pointcloud to 2D and store it in the frame's observation along with its TF
-    pcl::copyPointCloud(newlyAssociatedCloud, obsRec.baseCloud);
+    // Add transformed points to keyframe pointcloud to baseframe and store tf in the frame's observation record
+    *bigPcPtr += newlyAssociatedCloud;
     obsRec.tf = fullTfToBase;
-
-    // TODO Add tfcloud to association network?
     kfObs.insert(obsRec);
 }
 
@@ -257,7 +252,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         if (pointMatches.size() < 2) { unassociatedObs.push_back(myObs); std::cout << "No matches found." << std::endl;
         } else {
             // Estimate tf from reference to target frame (assuming we have gotten rid of outliers already)
-            std::cout << "Found match with frame " << revKfIter->frameId << ", adding it to the end of the associated clouds." << std::endl;
+            std::cout << "Found match with frame " << revKfIter->frameId << ", associating..." << std::endl;
             tfCloud(revKfIter->tf, computeRigid2DEuclidTf(pointMatches), myObs);
 
             // Try to match all unassociated observations with the current observation
@@ -287,8 +282,8 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         if (pointMatches.size() < 2) { unassociatedObs.push_back(myObs); std::cout << "None found." << std::endl;
         } else {
             // Assign the target frame of this match as the base of the keyframe
-            revIter->tf = Eigen::Matrix4f::Identity();    
-            revIter->baseCloud = revIter->cloud;
+            revIter->tf = Eigen::Matrix4f::Identity();
+            pcl::copyPointCloud(revIter->cloud, *bigPcPtr);
             kfObs.insert(*revIter);
 
             // Estimate tf from reference to target frame (assuming we have gotten rid of outliers already)
@@ -329,26 +324,40 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
     // n = max #associated frames before sending, m = #unassociated frames before sending any associated
     int n = 5, m = 3; // TODO get this value from a param
-    // If number of associated frames exceeds limit or there have been too many unassociated frames since one was associated:
+    // If number of associated frames exceeds limit or there have been too many unassociated frames since one was associated: send to backend
     if (kfObs.size() >= n || (!kfObs.empty() && kfObs.rbegin()->frameId + m <= cloudMsg->header.seq)) {
         // At this point, all pc in kfObs should be in the same reference frame
-        // Combine them --> do standard clustering/point association
+        std::cout << "Keyframe with IDs ";
+        for (auto& obs : kfObs) std::cout << obs.frameId << "(" << obs.cloud.size() << "), ";
+        std::cout << " sending..." << std::endl;
 
         // TODO talk to Bailey about efficiently deriving the cluster centers out in either nlogn or linear time
-        
-        pcl::PointCloud<pcl::PointXY> bigPC, bigOgPC;
-        std::cout << "Keyframe with IDs ";
-        for (auto& bingo : kfObs) {
-            bigPC += bingo.baseCloud;
-            bigOgPC += bingo.cloud;
-            std::cout << bingo.frameId << "(" << bingo.baseCloud.size() << "), ";
+        // (maybe this greedy solution is good enough)
+        // Combine them --> do standard clustering/point association
+        pcl::EuclideanClusterExtraction<pcl::PointXYZ> ece;
+        ece.setInputCloud(bigPcPtr);
+        ece.setClusterTolerance(0.1); // Set the spatial cluster tolerance (in meters)
+        ece.setMinClusterSize(1);
+        ece.setMaxClusterSize(n);
+        std::vector<pcl::PointIndices> cluster_indices;
+        ece.extract(cluster_indices);
+
+        // Put centroids of each cluster as points of cloud to send to backend 
+        pcl::PointCloud<pcl::PointXY> outputCloud;
+        Eigen::Vector4f myCentroidOutput;
+        // Eigen::Matrix3f covarMat;
+        for (auto& indices : cluster_indices) {
+            // std::cout << indices << std::endl;
+            pcl::compute3DCentroid(*bigPcPtr, indices, myCentroidOutput);
+            outputCloud.push_back(pclConvert(myCentroidOutput));
+            // pcl::computeCovarianceMatrix(*bigPcPtr, indices, myCentroidOutput, covarMat);
+            // std::cout << myCentroidOutput << std::endl << covarMat << std::endl;
         }
-        std::cout << " sending..." << std::endl;
         
         // TODO should timestamp of message be that of the base frame or whatever the current time is?
-        publishKeyFrame(bigPC, kfObs.begin()->frameId, "sensor_frame");
-        publishOgFrameSet(bigOgPC, kfObs.begin()->frameId, "sensor_frame");
+        publishKeyFrame(outputCloud, kfObs.begin()->frameId, "sensor_frame");
         kfObs.clear();
+        bigPcPtr->clear();  // TODO might be overkill because it gets overwritten when base frame re-inits anyway
     }
 
     // If an unassociated frame becomes too old before it can be associated, remove it
@@ -363,7 +372,6 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     // I'm guessing I could estimate whether a pc was transformed correctly by checking pc similarity with the other pcs
         // I would imagine that the similarity value would be significantly bigger
         // https://stackoverflow.com/questions/55913968/metric-to-compare-two-point-clouds-similarity
-
 }
 
 
@@ -378,7 +386,6 @@ int main(int argc, char **argv) {
 
     ros::Subscriber sub = n.subscribe("/sim_path/local_points", 10, parse2DPC);
     kfpub = n.advertise<sensor_msgs::PointCloud2>("keyframe", 10);
-    ogfpub = n.advertise<sensor_msgs::PointCloud2>("ogframe", 10);
 
     ros::spin();
 
