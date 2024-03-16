@@ -55,8 +55,6 @@ add_executable(ForestSim
 
 add_executable(CreateForest src/old/poisson_disk_sampling.cpp)
 
-add_executable(Homog src/homography.cpp)
-
 include_directories(include ${catkin_INCLUDE_DIRS})
 
 add_executable(ultimate_path src/ultimate_path.cpp)
@@ -81,3 +79,15 @@ SET_TARGET_PROPERTIES(UrquhartExample PROPERTIES COMPILE_DEFINITIONS "qh_QHpoint
 target_include_directories(ForestSim PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
 target_link_libraries(ForestSim PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
 SET_TARGET_PROPERTIES(ForestSim PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
+
+
+add_executable(ObsRanger
+    src/obs_range_testing.cpp
+    src/observation.cpp
+    src/tree.cpp
+    src/descriptor.cpp
+    src/matching.cpp
+    )
+target_include_directories(ObsRanger PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
+target_link_libraries(ObsRanger PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
+SET_TARGET_PROPERTIES(ObsRanger PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")

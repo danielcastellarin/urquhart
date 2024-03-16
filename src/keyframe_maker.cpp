@@ -355,6 +355,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         }
         
         // TODO should timestamp of message be that of the base frame or whatever the current time is?
+        // TODO frameId be fresh for keyframes?
         publishKeyFrame(outputCloud, kfObs.begin()->frameId, "sensor_frame");
         kfObs.clear();
         bigPcPtr->clear();  // TODO might be overkill because it gets overwritten when base frame re-inits anyway
