@@ -21,7 +21,8 @@ inline double euclideanDistance(std::vector<double> A, std::vector<double> B)
   {
     d += pow_2(A[i] - B[i]);
   }
-  return std::sqrt(d);
+  // return std::sqrt(d);
+  return d;
 }
 
 inline double euclideanDistance2D(std::vector<double> A, std::vector<double> B)
@@ -31,7 +32,8 @@ inline double euclideanDistance2D(std::vector<double> A, std::vector<double> B)
   {
     d += pow_2(A[i] - B[i]);
   }
-  return std::sqrt(d);
+  // return std::sqrt(d);
+  return d;
 }
 
 inline size_t cantorPairing(size_t a, size_t b)

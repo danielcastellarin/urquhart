@@ -44,15 +44,62 @@ void linePointMatching(const urquhart::Polygon &A, const urquhart::Polygon &B,
                         std::vector<std::pair<vecPtT, vecPtT>> &pointMatches,
                         std::set<size_t>& unique_matches)
 {
-    // // chi works as a permutation matrix
+    // chi works as a permutation matrix
+    std::vector<size_t> chi = {0, 1, 2}, bestPermutation;
+
+    // Permute the edges to find the best match between the triangles
+    double bestDist = 1000000;
+    do {
+        double d = euclideanDistance(A.edgeLengths, std::vector<double>{B.edgeLengths[chi[0]], B.edgeLengths[chi[1]], B.edgeLengths[chi[2]]});
+        if (d < bestDist) {
+            bestDist = d;
+            bestPermutation = chi;
+        }
+    } while (std::next_permutation(chi.begin(), chi.end()));
+
+    // For each pair of edges matched, associate the vertices across from each edge 
+    for (size_t i = 0; i < 3; ++i) {
+        int refIdx = (i+2)%3, targIdx = (bestPermutation[i]+2)%3;
+        size_t uid = cantorPairing(A.edges[refIdx].first, B.edges[targIdx].first);
+        if (unique_matches.find(uid) == unique_matches.end()) {
+            pointMatches.push_back({A.points[refIdx], B.points[targIdx]});
+            unique_matches.insert(uid);
+        }
+    }
+
     // std::vector<size_t> chi = {0, 1, 2};
     // std::vector<size_t> bestPermutation;
+
+    // double Aord = 0, Bord = 0;
+    // for (int i=0; i<3; ++i) {
+    //     Aord += (A.points[(i+1)%3][0]-A.points[i][0])*(A.points[(i+1)%3][1]+A.points[i][1]);
+    //     Bord += (B.points[(i+1)%3][0]-B.points[i][0])*(B.points[(i+1)%3][1]+B.points[i][1]);
+    // }
+    // PointVector APoints, BPoints;
+    // if (Aord < 0) {
+    //     APoints = {A.points[1], A.points[0], A.points[2]};
+    // } else {
+    //     APoints = {A.points[0], A.points[1], A.points[2]};
+    // }
+    // if (Bord < 0) {
+    //     BPoints = {B.points[1], B.points[0], B.points[2]};
+    // } else {
+    //     BPoints = {B.points[0], B.points[1], B.points[2]};
+    // }
+
+    // std::vector<double> AedgeLens = {
+    //     pow_2(APoints[0][0]-APoints[1][0]) + pow_2(APoints[0][1]-APoints[1][1]),
+    //     pow_2(APoints[1][0]-APoints[2][0]) + pow_2(APoints[1][1]-APoints[2][1]),
+    //     pow_2(APoints[2][0]-APoints[0][0]) + pow_2(APoints[2][1]-APoints[0][1]),
+    // }, BedgeLens = {
+    //     pow_2(BPoints[0][0]-BPoints[1][0]) + pow_2(BPoints[0][1]-BPoints[1][1]),
+    //     pow_2(BPoints[1][0]-BPoints[2][0]) + pow_2(BPoints[1][1]-BPoints[2][1]),
+    //     pow_2(BPoints[2][0]-BPoints[0][0]) + pow_2(BPoints[2][1]-BPoints[0][1])
+    // };
+
     // double bestDist = 1000000;
-    // do
-    // {
-    //     std::vector<double> permutation = {B.edgeLengths[chi[0]],
-    //                                         B.edgeLengths[chi[1]], B.edgeLengths[chi[2]]};
-    //     double d = euclideanDistance(A.edgeLengths, permutation);
+    // do {
+    //     double d = euclideanDistance(AedgeLens, std::vector<double>{BedgeLens[chi[0]], BedgeLens[chi[1]], BedgeLens[chi[2]]});
     //     if (d < bestDist)
     //     {
     //         bestDist = d;
@@ -61,72 +108,18 @@ void linePointMatching(const urquhart::Polygon &A, const urquhart::Polygon &B,
     // } while (std::next_permutation(chi.begin(), chi.end()));
 
     // for (size_t i = 0; i < 3; ++i)
-    // {
+    // {   // FIXME unique matches does not actually line up with the vertices used above
     //     size_t pAIdx = A.edges[i].first; 
     //     size_t pBIdx = B.edges[bestPermutation[i]].first;
     //     size_t idx = cantorPairing(pAIdx, pBIdx);
     //     if(unique_matches.find(idx) == unique_matches.end())
     //     {
-    //         vecPtT pA = A.points[i];
-    //         vecPtT pB = B.points[bestPermutation[i]];
+    //         vecPtT pA = APoints[i];
+    //         vecPtT pB = BPoints[bestPermutation[i]];
     //         pointMatches.push_back(std::make_pair(pA, pB));
     //         unique_matches.insert(idx);
     //     }
     // }
-
-    std::vector<size_t> chi = {0, 1, 2};
-    std::vector<size_t> bestPermutation;
-
-    double Aord = 0, Bord = 0;
-    for (int i=0; i<3; ++i) {
-        Aord += (A.points[(i+1)%3][0]-A.points[i][0])*(A.points[(i+1)%3][1]+A.points[i][1]);
-        Bord += (B.points[(i+1)%3][0]-B.points[i][0])*(B.points[(i+1)%3][1]+B.points[i][1]);
-    }
-    PointVector APoints, BPoints;
-    if (Aord < 0) {
-        APoints = {A.points[1], A.points[0], A.points[2]};
-    } else {
-        APoints = {A.points[0], A.points[1], A.points[2]};
-    }
-    if (Bord < 0) {
-        BPoints = {B.points[1], B.points[0], B.points[2]};
-    } else {
-        BPoints = {B.points[0], B.points[1], B.points[2]};
-    }
-
-    std::vector<double> AedgeLens = {
-        pow_2(APoints[0][0]-APoints[1][0]) + pow_2(APoints[0][1]-APoints[1][1]),
-        pow_2(APoints[1][0]-APoints[2][0]) + pow_2(APoints[1][1]-APoints[2][1]),
-        pow_2(APoints[2][0]-APoints[0][0]) + pow_2(APoints[2][1]-APoints[0][1]),
-    }, BedgeLens = {
-        pow_2(BPoints[0][0]-BPoints[1][0]) + pow_2(BPoints[0][1]-BPoints[1][1]),
-        pow_2(BPoints[1][0]-BPoints[2][0]) + pow_2(BPoints[1][1]-BPoints[2][1]),
-        pow_2(BPoints[2][0]-BPoints[0][0]) + pow_2(BPoints[2][1]-BPoints[0][1])
-    };
-
-    double bestDist = 1000000;
-    do {
-        double d = euclideanDistance(AedgeLens, std::vector<double>{BedgeLens[chi[0]], BedgeLens[chi[1]], BedgeLens[chi[2]]});
-        if (d < bestDist)
-        {
-            bestDist = d;
-            bestPermutation = chi;
-        }
-    } while (std::next_permutation(chi.begin(), chi.end()));
-
-    for (size_t i = 0; i < 3; ++i)
-    {   // FIXME unique matches does not actually line up with the vertices used above
-        size_t pAIdx = A.edges[i].first; 
-        size_t pBIdx = B.edges[bestPermutation[i]].first;
-        size_t idx = cantorPairing(pAIdx, pBIdx);
-        if(unique_matches.find(idx) == unique_matches.end())
-        {
-            vecPtT pA = APoints[i];
-            vecPtT pB = BPoints[bestPermutation[i]];
-            pointMatches.push_back(std::make_pair(pA, pB));
-            unique_matches.insert(idx);
-        }
-    }
 }
 
 std::vector<std::pair<vecPtT, vecPtT>> hierarchyMatching(
