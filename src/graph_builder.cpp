@@ -325,10 +325,10 @@ struct SLAMGraph {
     // std::unordered_map<int, Pose> poseNodes;
     std::unordered_map<int, Eigen::Vector3f> poseNodeMap;
     // std::unordered_map<int, Point> landmarkNodes;
-    // std::unordered_map<Point, int> landmarkIds;
     // PointMap landmarkIds;
-    std::unordered_map<Eigen::Vector2f, int, matrix_hash<Eigen::Vector2f>> landmarkIds;
-    std::unordered_map<int, Landmark> landmarkNodeMap;
+    std::unordered_map<Eigen::Vector2f, int, matrix_hash<Eigen::Vector2f>> landmarkIdMap;
+    std::unordered_map<int, Eigen::Vector2f> landmarkNodeMap;
+    // std::unordered_map<int, Landmark> landmarkNodeMap;
     std::vector<LamePPEdge> lameppEdges;
     std::vector<LamePLEdge> lameplEdges;
 
@@ -350,7 +350,8 @@ struct SLAMGraph {
         stateVector.tail(3) = pose; // TODO: VERIFY THIS IS VALID!?!?!?!?
     }
     void addLameLandmarkNode(Eigen::Vector2f& position) {
-        landmarkNodeMap[--prevLdmkId] = Landmark(position, prevLdmkId);
+        // landmarkNodeMap[--prevLdmkId] = Landmark(position, prevLdmkId);
+        landmarkNodeMap[--prevLdmkId] = position;
         // the start of this node's data will be at the end of the current state vector
         nodePositionsInVector[prevLdmkId] = stateVector.size();
         stateVector.conservativeResize(stateVector.size()+2);   // Append (x,y) to the end of state vector 
@@ -382,6 +383,7 @@ struct SLAMGraph {
     void addLamePPEdge(int srcId, int dstId) {
         lameppEdges.push_back(LamePPEdge(srcId, dstId, poseNodeMap[srcId] - poseNodeMap[dstId]));
     }
+    
     void addLamePLEdge(int srcId, int dstId, Eigen::Vector2f localTreePosition) {
         lameplEdges.push_back(LamePLEdge(srcId, dstId, localTreePosition));
     }
@@ -389,7 +391,7 @@ struct SLAMGraph {
         lameplEdges.push_back(LamePLEdge(prevPoseId, dstId, localTreePosition));
     }
     void addLamePLEdge(Eigen::Vector2f localTreePosition) {
-        lameplEdges.push_back(LamePLEdge(prevPoseId, landmarkIds[localTreePosition], localTreePosition));
+        lameplEdges.push_back(LamePLEdge(prevPoseId, landmarkIdMap[localTreePosition], localTreePosition));
     }
 
     PoseNode* addPPEdge(Eigen::Vector3f currentPose) {
@@ -404,6 +406,26 @@ struct SLAMGraph {
         // Regardless, this function expects that node to have been defined already
         // landmarkLocalPosition is taken directly from the landmarks position in this keyframe
         plEdges.push_back(PLEdge(&poseNodeList.back(), existingLandmarkNode, landmarkLocalPosition));
+    }
+
+
+
+    void updateLameNodesFromStateVector() {
+        for (auto&[nodeId, stateVectorPosition] : nodePositionsInVector) {
+            if (nodeId > 0) {
+                poseNodeMap[nodeId] = stateVector.segment(stateVectorPosition, 3);
+            } else {
+                landmarkNodeMap[nodeId] = stateVector.segment(stateVectorPosition, 2);
+            }
+        }
+    }
+
+    void updateNodesFromStateVector() {
+        // I only really care about the last pose and all the landmarks
+        poseNodeList.back().pose = stateVector.segment(poseNodeList.back().stateVectorIdx, 3);
+        for (auto& node : landmarkNodeList) {
+            node.position = stateVector.segment(node.stateVectorIdx, 2);
+        }
     }
 };
 
@@ -426,6 +448,33 @@ x = A.svd() .solve(b));  // Stable, slowest. #include <Eigen/SVD>
 SLAMGraph g;
 
 
+float computeGlobalError() {
+    float globalError = 0;
+
+    for (auto& edge : g.lameppEdges) {
+        int iStart = g.nodePositionsInVector[edge.src], jStart = g.nodePositionsInVector[edge.dst];
+        Eigen::Vector3f xI(g.stateVector.segment(iStart, 3)), xJ(g.stateVector.segment(jStart, 3)), eIJ;
+        Eigen::Matrix3f XI = v2t(xI), XJ = v2t(xJ), ZIJ = v2t(edge.distance);
+        Eigen::Matrix3f XI_inv = XI.inverse(), ZIJ_inv = ZIJ.inverse();
+
+        eIJ = t2v(ZIJ_inv * (XI_inv * XJ)); // NOTE previous 5 lines are verbatim from eIJ calc when optimizing graph; make function
+        globalError += eIJ.transpose() * edge.info * eIJ;
+    }
+
+    for (auto& edge : g.lameplEdges) {
+        int iStart = g.nodePositionsInVector[edge.src], jStart = g.nodePositionsInVector[edge.dst];
+        Eigen::Vector3f x(g.stateVector.segment(iStart, 3));
+        Eigen::Vector2f l(g.stateVector.segment(jStart, 2)), eIJ;
+        float s = sin(x(2)), c = cos(x(2));
+        Eigen::Matrix2f R_transposed;
+        // Eigen::Matrix2f R_transposed {c, s, -s, c}; // TODO check if valid init?
+        R_transposed << c, s,-s, c;
+        eIJ = (R_transposed * (l - x.head(2))) - edge.distance; // 2x1
+        globalError += eIJ.transpose() * edge.info * eIJ;
+    }
+
+    return globalError;
+}
 
 void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     // Take the points from the PointCloud2 message and create a geometric hierarchy from it
@@ -456,10 +505,10 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Define a new node and edge for the robot's estimated odometry
         // Keep the reference to the current PoseNode to use when creating landmark constraints
-        PoseNode* currentPoseNode = g.addPPEdge(t2v(currentGlobalRobotPoseTf));
+        // PoseNode* currentPoseNode = g.addPPEdge(t2v(currentGlobalRobotPoseTf));
         // Alternative external map version:
-        // g.addLamePoseNode(t2v(currentGlobalRobotPoseTf));
-        // g.addLamePPEdge();
+        g.addLamePoseNode(t2v(currentGlobalRobotPoseTf));
+        g.addLamePPEdge();
 
         // TODO (maybe) enable geo hierarchy to reference LandmarkNodes (Polygon object stores LandmarkNodes in vector corr. every element in "points")
         //      --> when match occurs, pass back the target's LandmarkNode corr. to the point
@@ -470,6 +519,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             localMatchedPoints.insert(refP);
         }
 
+        // Try to associate other local points in the global frame  
         bool hasNewLandmarks = false;
         for (auto& pt : vectorOfTrees) {
             // Only process points that were not EXPLICITLY matched with existing landmarks
@@ -489,7 +539,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
                 // Find the nearest existing landmark below the nearness threshold for the given point in the global frame
                 for (auto& [id, globPt] : g.landmarkNodeMap) {
-                    double diffX = std::abs(globalLandmarkPosition(0,2) - globPt.p(0)), diffY = std::abs(globalLandmarkPosition(1,2) - globPt.p(1));
+                    double diffX = std::abs(globalLandmarkPosition(0,2) - globPt(0)), diffY = std::abs(globalLandmarkPosition(1,2) - globPt(1));
                     // TODO make this more robust
                     if (diffX < nearestPointX && diffY < nearestPointY) {
                         nearestPointX = diffX, nearestPointY = diffY, nearestPointId = id;
@@ -599,9 +649,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             H.block(jStart, jStart, 2, 2) += B.transpose() * edge.info * B;
         }
 
-        // Solve the system for how much the state vector has changed
-        // Update the state vector
-        // Eigen::VectorXf dx(g.stateVector.size()) = 
+        // Update the state vector; according to the result of the system of equations
         g.stateVector += H.llt().solve(b);
         /* NOTE THE ARCANE KNOWLEDGE OF SOLVING LINEAR SYSTEMS WITH EIGEN 
 
@@ -619,10 +667,12 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         */
         
         
-        // TODO Extract the data from the state vector and update the semantic values
-        // globalTreeIDs
-        // globObs.landmarks
-        // NOTE globObs.H will be handled below
+        // Extract the data from the state vector and update the semantic nodes
+        g.updateLameNodesFromStateVector();
+        // g.updateNodesFromStateVector();
+        // NOTE g.geoHier polygons will be handled below
+        //      If we assume that the landmark nodes hold references to the points in the geometric hierarchy,
+        //      then maybe updating edgeLengths and descriptor will be simpler after? 
 
         // TODO Spooky aftermath update of geometric hierarchy 
         if (hasNewLandmarks) { // these points SHOULD be on the outer boundary of the global map
