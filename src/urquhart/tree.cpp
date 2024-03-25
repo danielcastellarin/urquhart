@@ -1,10 +1,10 @@
-#include <hype_tree.hpp>
+#include <tree.hpp>
 
-namespace hype_urq {
+namespace urquhart {
 
-Tree::Tree(const std::vector<EpicPolygon>& polygons){
+Tree::Tree(const std::vector<Polygon>& polygons){
     // create the root node
-    root = add_vertex(EpicPolygon(), graph);
+    root = add_vertex(Polygon(), graph);
     // add all elements and point them to the root
     for(auto p : polygons){
         BoostVertexT v = add_vertex(p, graph);
@@ -28,11 +28,11 @@ void Tree::view_h2_polygons() {
     }
 }
 
-EpicPolygon Tree::get_vertex(const BoostVertexT v){
+Polygon Tree::get_vertex(const BoostVertexT v){
     return graph[v];
 }
 
-BoostVertexT Tree::merge_op(BoostVertexT i, BoostVertexT j, const EpicPolygon& data){
+BoostVertexT Tree::merge_op(BoostVertexT i, BoostVertexT j, const Polygon& data){
     BoostVertexT v = add_vertex(data, graph);
     add_edge(root, v, graph);
 
@@ -77,7 +77,6 @@ BoostVertexT Tree::get_ancestor(const BoostVertexT v){
     breadth_first_search(reversedGraph, v, visitor(vis));
     BoostVertexT ancestor = 0;
     if (polygons.size() > 0) ancestor = polygons[polygons.size()-1];
-    // BoostVertexT ancestor = polygons.size() > 0 ? polygons[-1] : 0;
     return ancestor;
 }
 

@@ -6,47 +6,53 @@
 
 using namespace std;
 
-PointVector readFile(string path){
-    PointVector landmarks;
+Points readCoolFile(string path) {
     ifstream infile(path);
+    std::vector<Eigen::Vector2d> intake;
 
-    while (infile)
-    {
+    while (infile) {
         string s;
         if (!getline(infile, s)) break;
 
         istringstream ss(s);
-        vecPtT record;
-
-        while (ss){
-        string s;
-        if (!getline(ss, s, ',')) break;
-        record.push_back(stod(s));
+        PtLoc record;
+        int idx = -1;
+        while (ss) {
+            string s;
+            if (!getline(ss, s, ',')) break;
+            record(++idx) = stod(s);
         }
-
-        landmarks.push_back(record);
+        intake.push_back(record);
     }
-    if (!infile.eof())
-    {
+    if (!infile.eof()) {
         cerr << "Fooey!\n";
     }
+
+    Points landmarks(2, intake.size());
+    for (int i = 0; i < intake.size(); ++i) {
+        landmarks.col(i) = intake[i];
+    }
+
     return landmarks;
 }
 
-int main(int argc, char* argv[]){
-    if(argc > 2){
-        PointVector points = readFile(string(argv[1]));
-        urquhart::Observation obs(points);
-        obs.view();
+int main(int argc, char* argv[]) {
+    if (argc > 2) {
+        Points points1 = readCoolFile(string(argv[1]));
+        urquhart::Observation obs1(points1);
+        std::cout << "Obs 1 Polygons: " << std::endl;
+        obs1.view();
 
-        PointVector pointsr = readFile(string(argv[2]));
-        urquhart::Observation obsr(pointsr);
-        obsr.view();
+        Points points2 = readCoolFile(string(argv[2]));
+        urquhart::Observation obs2(points2);
+        std::cout << "Obs 2 Polygons: " << std::endl;
+        obs2.view();
 
-        auto matches = matching::hierarchyMatching(obs, obsr, 5);
-        for(auto m : matches){
-            std::cout << m.first[0] << "," << m.first[1] << ",";
-            std::cout << m.second[0] << "," << m.second[1] << std::endl;
+        std::cout << "Matching Time: " << std::endl;
+        auto matches = matching::hierarchyMatching(obs1, obs2, 5);
+        for (const auto& [refPoint, targPoint] : matches) {
+            std::cout << refPoint(0) << "," << refPoint(1) << "|";
+            std::cout << targPoint(0) << "," << targPoint(1) << std::endl;
         }
         return 0;
 

@@ -1,8 +1,8 @@
-#include <hype_descriptor.hpp>
+#include <descriptor.hpp>
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/eigen.hpp>
 
-namespace hype_descriptor {
+namespace poly_desc {
     // Samples points around the perimeter of a polygon and returns a new set of points.
     // The size of the returned PointVector depends on step.
     // Smaller steps means more points will be sampled,
@@ -12,46 +12,21 @@ namespace hype_descriptor {
                         const Points& ldmks,
                         const Eigen::VectorXd& eLens,
                         double step) {
-        // Find the perimeter of this polygon
-        // double perimeter = 0;
-        // for (const auto& key : eRefs) perimeter += eLens(eRefMap.at(key)); // TODO why does operator[] not work here? can't enforce constant
-        // for (const auto& key : eRefs) {
-        //     perimeter += eLens(eRefMap.at(key));
-        //     // std::cout << "len=" << eLens(eRefMap.at(key)) << std::endl;
-        // }
-        double perimeter = eLens(eRefs).sum();
-        // std::cout << "perim=" << perimeter << std::endl;
-        // std::cout << perimeter << std::endl;
 
+        // Create a list of cumulative edge lengths normalized
+        Eigen::VectorXd normalizedAccumLens = eLens(eRefs) / eLens(eRefs).sum();
+        for (int i = 1; i < normalizedAccumLens.size(); ++i) normalizedAccumLens(i) += normalizedAccumLens(i-1);
 
-        // Create a list of normalized cumulative edge lengths
-        std::vector<double> normalizedAccumLens;
-        for (const auto& key : eRefs) {
-            double normalizedLen = eLens(key) / perimeter;
-            // if (normalizedAccumLens.size() > 0) normalizedLen += normalizedAccumLens[-1];
-            if (normalizedAccumLens.size() > 0) normalizedLen += normalizedAccumLens[normalizedAccumLens.size()-1];
-            // std::cout << "next normLen=" << normalizedLen << std::endl;
-            normalizedAccumLens.push_back(normalizedLen);
-        }
-
-        // std::cout << "Points: (" << vRefs.transpose() << ")" << std::endl << ldmks(Eigen::placeholders::all, vRefs) << std::endl;
-
-        // std::cout << "Normalized Lens:";
-        // for (auto p : normalizedAccumLens) {
-        //     std::cout << " " << p;
-        // }
-        // std::cout << std::endl;
-
-        // Take samples from the polygon
+        // Prepare for polygon sampling
         Points sampledPoints(2, int(ceil(1/step)));
-        // std::cout << "size=" << sampledPoints.size() << std::endl;
         size_t currLdmkIdx = 0, nextLdmkIdx = 1, prevLdmkIdx = vRefs.size()-1;
         int currSampledPointColumn = -1;
         double coveredPerimPercent = 0, d = 0;
+
+        // Loop until we have sampled from the whole perimeter
         while (std::abs(coveredPerimPercent - 1.0) > 0.0001) {
-            // std::cout << "d=" << d << ", currLdmkIdx=" << currLdmkIdx << ", coveredPerimPercent=" << coveredPerimPercent << std::endl;
             
-            // Increment our indices when the previous edge has been surpassed
+            // Increment our indices to our landmark references once we have stepped past the previous edge
             if (coveredPerimPercent > normalizedAccumLens[currLdmkIdx]) {
                 prevLdmkIdx = currLdmkIdx;
                 nextLdmkIdx = (++currLdmkIdx+1) % vRefs.size();
@@ -69,29 +44,11 @@ namespace hype_descriptor {
             }
             // Otherwise d does not change
             
-            // std::cout << "d=" << d << std::endl;
-            // std::cout << "a=(" << ldmks.col(vRefs(currLdmkIdx)).transpose() <<")" << std::endl;
-            // std::cout << "b=(" << ldmks.col(vRefs(nextLdmkIdx)).transpose() <<")" << std::endl;
-            // std::cout << "p=(" << (ldmks.col(vRefs(currLdmkIdx)) + d * (ldmks.col(vRefs(nextLdmkIdx)) - ldmks.col(vRefs(currLdmkIdx)))).transpose() <<")" << std::endl;
-            
-            // Get point relative to current % of line segment
+            // Sample point relative to current percentage of line segment
             // [sample] = [p1] + d * ([p2] - [p1])
-            // std::cout << "size=" << ldmks.col(currLdmkIdx) << " + " << ldmks.col(nextLdmkIdx) << std::endl;
             sampledPoints.col(++currSampledPointColumn) = ldmks.col(vRefs(currLdmkIdx)) + d * (ldmks.col(vRefs(nextLdmkIdx)) - ldmks.col(vRefs(currLdmkIdx)));
             coveredPerimPercent += step;
-            // std::cout << std::endl << std::endl;
         }
-        // std::cout << "boop" << std::endl;
-
-        // std::cout << sampledPoints << std::endl;
-        // std::cout << sampledPoints << std::endl << std::endl << std::endl;
-        // std::cout << "Points";
-        // for (int c=0; c < sampledPoints.cols(); ++c) {
-        //     std::cout << " : " << sampledPoints(0, c) << " " << sampledPoints(1, c);
-        // }
-        // std::cout << std::endl << std::endl << std::endl;
-        // abort();
-
         return sampledPoints;
     }
 
@@ -99,13 +56,12 @@ namespace hype_descriptor {
     // Uses sampled points to compute a centroid distance descriptor
     Eigen::VectorXd findCentroidDistance(const Eigen::VectorXi& ldmkIndices, const Points& ldmks, Points sampledPoints) {
         Eigen::Vector2d centroid = ldmks(Eigen::placeholders::all, ldmkIndices).rowwise().sum() / ldmkIndices.size();
-        // centroid.array() /= ldmkIndices.size();
         return centroidDistance(sampledPoints, centroid);
 
-        // TODO maybe do centroid distance here?
+        // TODO maybe just do centroid distance here?
         // Points centroidMatrix(sampledPoints.cols());
         // centroidMatrix.colwise() = ldmks(Eigen::placeholders::all, ldmkIndices).rowwise().sum() / ldmkIndices.size();
-        // return (centroidMatrix - sampledPoints).array().square().colwise().sum();
+        // return (centroidMatrix - sampledPoints).array().square().colwise().sum().sqrt();
     }
 
     // Uses OpenCV to compute the magnitude of the DFT of the centroid descriptor
@@ -133,7 +89,6 @@ namespace hype_descriptor {
                     magI.ptr<double>(i), magI.ptr<double>(i)+magI.cols*magI.channels());
             }
         }
-        // Eigen::VectorXd IDFT(dftDesc.data());
         Eigen::VectorXd IDFT(dftDesc.size());
         IDFT = Eigen::Map<Eigen::VectorXd>(dftDesc.data(), dftDesc.size(), 1);
         return IDFT;

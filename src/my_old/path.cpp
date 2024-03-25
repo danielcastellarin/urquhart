@@ -139,6 +139,8 @@ struct RobotHistory
             for (auto pMatch : polygonMatches) {
                 refIds = currentObs.H->get_children(pMatch.first);
                 targIds = prevObs.H->get_children(pMatch.second);
+                // std::vector<size_t> newTargIds = prevObs.H->new_get_children(pMatch.second);
+
                 // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
                 matching::polygonMatching(currentObs, refIds, prevObs, targIds, 5, triangleMatches);
             }

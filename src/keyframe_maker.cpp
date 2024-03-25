@@ -1,5 +1,4 @@
 #include <ros/ros.h>
-#include <observation.hpp>
 #include <matching.hpp>
 #include <memory>
 #include <random>
