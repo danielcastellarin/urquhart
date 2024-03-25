@@ -19,7 +19,6 @@
 
 std::vector<std::pair<Eigen::Vector2f, Eigen::Vector2f>> matchObs(urquhart::Observation &ref, urquhart::Observation &targ, double polyMatchThresh, double validPointMatchThresh) {
     std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
-    // std::vector<std::pair<vecPtT, vecPtT>> pointMatches;
     std::vector<std::pair<Eigen::Vector2f, Eigen::Vector2f>> vertexMatches;
     std::set<size_t> uniqueMatches;
 
@@ -231,6 +230,7 @@ struct LamePLEdge { // Point location derived from matching local shapes with gl
 
 Eigen::Matrix3f v2t(Eigen::Vector3f vec) {
     float c = cos(vec(2)), s = sin(vec(2));
+    // Eigen::Matrix3f tf {c, -s, vec(0), s,  c, vec(1), 0, 0, 1};
     // Eigen::Matrix3f tf {
     //     {c, -s, vec(0)},
     //     {s,  c, vec(1)},
@@ -383,7 +383,7 @@ struct SLAMGraph {
     void addLamePPEdge(int srcId, int dstId) {
         lameppEdges.push_back(LamePPEdge(srcId, dstId, poseNodeMap[srcId] - poseNodeMap[dstId]));
     }
-    
+
     void addLamePLEdge(int srcId, int dstId, Eigen::Vector2f localTreePosition) {
         lameplEdges.push_back(LamePLEdge(srcId, dstId, localTreePosition));
     }
