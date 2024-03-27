@@ -21,4 +21,10 @@ namespace matching
     // pair.first refers to a point in ref, pair.second refers to a point in targ
     std::vector<std::pair<PtLoc, PtLoc>> hierarchyMatching(const urquhart::Observation &ref,
                                                              const urquhart::Observation &targ, double thresh);
+
+
+    std::vector<std::pair<Eigen::Index, Eigen::Index>> pointIndexMatching(const urquhart::Observation &ref, const urquhart::Observation &targ, const std::vector<std::pair<size_t, size_t>> &triangleMatches);
+
+    std::vector<std::pair<Eigen::Index, Eigen::Index>> hierarchyIndexMatching(const urquhart::Observation &ref,
+                                                        const urquhart::Observation &targ, double thresh);
 }

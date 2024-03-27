@@ -140,3 +140,17 @@ SET_TARGET_PROPERTIES(MyExample PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
 # # target_link_libraries(KeyframeGen PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
 # target_link_libraries(KeyframeGen PUBLIC ${PCL_LIBRARIES} ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
 # SET_TARGET_PROPERTIES(KeyframeGen PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
+
+
+# GraphSLAM Node
+# PCL takes a minute to compile, so only uncomment when actively developing
+add_executable(PolygonSLAM
+    src/graph_builder.cpp
+    src/urquhart/observation.cpp
+    src/urquhart/tree.cpp
+    src/urquhart/descriptor.cpp
+    src/urquhart/matching.cpp
+    )
+target_include_directories(PolygonSLAM PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
+target_link_libraries(PolygonSLAM PUBLIC ${PCL_LIBRARIES} ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
+SET_TARGET_PROPERTIES(PolygonSLAM PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")

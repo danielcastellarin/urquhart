@@ -21,6 +21,9 @@ namespace urquhart {
             explicit Observation(std::vector<std::vector<double>>& freshLandmarks);
             void view();
 
+            void computeHierarchy();
+            void recomputeEdgeLengths();
+
             // Storage for the positions of all landmarks in this observation (one per column)
             // All polygons store references to these values
             Points landmarks;

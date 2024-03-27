@@ -4,10 +4,7 @@ namespace urquhart {
 
 Observation::Observation(Points& freshLandmarks) {
     landmarks = Eigen::Ref<Points>(freshLandmarks);
-    std::vector<Polygon> triangles;
-    delaunayTriangulationFromScratch(triangles);
-    H = new Tree(triangles);
-    urquhartTesselation_();
+    computeHierarchy();
 };
 
 Observation::Observation(std::vector<std::vector<double>>& freshLandmarks) {
@@ -17,13 +14,32 @@ Observation::Observation(std::vector<std::vector<double>>& freshLandmarks) {
         landmarks.col(i) = Eigen::Vector2d{freshLandmarks[i][0], freshLandmarks[i][1]};
     }
 
-    std::vector<Polygon> triangles;
-    delaunayTriangulationFromScratch(triangles);
-    H = new Tree(triangles);
-    urquhartTesselation_();
+    computeHierarchy();
 };
 
 void Observation::view() { H->view_h2_polygons(); }
+
+void Observation::computeHierarchy() {
+
+    // Initialize empty structures for edge data
+    triangulationEdges.resize(2, 1);
+    triangulationEdgeLengths.resize(1);
+    edgeRefMap.clear();
+
+    // Initialize hierarchy with Delaunay triangulation
+    std::vector<Polygon> triangles;
+    delaunayTriangulationFromScratch(triangles);
+    H = new Tree(triangles); // TODO use shared pointer here?
+
+    // Merge triangles into new polygons by removing their longest edges
+    urquhartTesselation_();
+}
+
+void Observation::recomputeEdgeLengths() {
+    for (Eigen::Index i = 0; i < triangulationEdges.cols(); ++i) {
+        triangulationEdgeLengths(i) = euclideanDistance2D(landmarks.col(triangulationEdges(0, i)), landmarks.col(triangulationEdges(1, i)));
+    }
+}
 
 // std::vector<size_t> Observation::getCurrentAndChildren() { return H->view_h2_polygons(); }
 
@@ -132,11 +148,6 @@ void Observation::printPolygon(const Polygon& p) {
 }
 
 void Observation::delaunayTriangulationFromScratch(std::vector<Polygon>& polygons) {
-    
-    // Initialize empty structures for edge data
-    triangulationEdges.resize(2, 1);
-    triangulationEdgeLengths.resize(1);
-
 
     // TODO insert data directly from Eigen Matrix, not some goofy vector
     std::vector<double> qhull_points_data(landmarks.size());
