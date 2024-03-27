@@ -1,5 +1,4 @@
 #include <parse_config.hpp>
-#include <observation.hpp>
 #include <matching.hpp>
 #include <memory>
 #include <random>
@@ -31,10 +30,14 @@ void writeHierarchyToFile(std::string fileName, const urquhart::Observation& tre
     std::ofstream dscOut(buildFilePath(dirName+"/d", fileName));
 
     write_graphviz(hieOut, trees.H->graph);
+    hieOut.close();
     
     // Iterate over the indices of the Polygons in the hierarchy
     for(auto pIdx : trees.H->get_children(trees.H->root)) {
-        for(auto ch : trees.H->graph[pIdx].points) plyOut << pIdx << " " << ch[0] << " " << ch[1] << "|";
+        for (int i = 0; i < trees.H->graph[pIdx].landmarkRefs.size(); ++i) {
+            auto myPoint =  trees.landmarks.col(trees.H->graph[pIdx].landmarkRefs(i));
+            plyOut << pIdx << " " << myPoint[0] << " " << myPoint[1] << "|";
+        }
         plyOut << std::endl;
         for(auto d : trees.H->graph[pIdx].descriptor) dscOut << d << " ";
         dscOut << std::endl;
@@ -42,22 +45,24 @@ void writeHierarchyToFile(std::string fileName, const urquhart::Observation& tre
         // Iterate over the indices of the Triangles that compose this Polygon
         for(auto tIdx : trees.H->traverse(pIdx)) {
             // Retain only the Polygon objects that have three sides
-            if (trees.H->graph[tIdx].points.size() == 3) {
-                for(auto ch : trees.H->graph[tIdx].points) triOut << tIdx << " " << ch[0] << " " << ch[1] << "|";
+            if (trees.H->graph[tIdx].n == 3) {
+                for (int i = 0; i < trees.H->graph[tIdx].landmarkRefs.size(); ++i) {
+                    auto myPoint = trees.landmarks.col(trees.H->graph[tIdx].landmarkRefs(i));
+                    triOut << tIdx << " " << myPoint[0] << " " << myPoint[1] << "|";
+                }
                 triOut << std::endl;
             }
         }
     }
     plyOut.close();
     triOut.close();
-    hieOut.close();
     dscOut.close();
 }
 
 void writeMatchesToDirectory(std::string dirName, 
                             std::map<int, std::vector<std::pair<size_t, size_t>>> polyMatches, 
                             std::map<int, std::vector<std::pair<size_t, size_t>>> triangleMatches, 
-                            std::map<int, std::vector<std::pair<vecPtT, vecPtT>>> pointMatches) {
+                            std::map<int, std::vector<std::pair<PtLoc, PtLoc>>> pointMatches) {
     std::system(("mkdir -p " + dirName+"/polygonIDs").c_str());
     std::system(("mkdir -p " + dirName+"/triangleIDs").c_str());
     std::system(("mkdir -p " + dirName+"/points").c_str());
@@ -114,7 +119,7 @@ struct RobotHistory
     std::vector<urquhart::Observation> observationHistory;
     std::map<int, std::vector<std::pair<size_t, size_t>>> consecutivePolyMatches;
     std::map<int, std::vector<std::pair<size_t, size_t>>> consecutiveTriMatches;
-    std::map<int, std::vector<std::pair<vecPtT, vecPtT>>> consecutivePointMatches;
+    std::map<int, std::vector<std::pair<PtLoc, PtLoc>>> consecutivePointMatches;
 
     std::vector<Pose> globalFrameRobotPose;
     std::vector<Pose> odomFrameRobotPose;
@@ -124,35 +129,27 @@ struct RobotHistory
     void saveLocalObservation(std::vector<Tree> obs) {localFrameTreeHistory.push_back(obs);}
     void saveOdomObservation(std::vector<Tree> obs) {odomFrameTreeHistory.push_back(obs);}
 
-    void savePolygonObservation(PointVector trees, int obsIdx) {
+    void savePolygonObservation(Points& trees, int obsIdx) {
         observationHistory.push_back(urquhart::Observation(trees));
         if (obsIdx) {
             // Polygon Matching
             auto& currentObs = observationHistory.end()[-1], prevObs = observationHistory.end()[-2];
-            std::vector<size_t> refIds = currentObs.H->get_children(0), targIds = prevObs.H->get_children(0);
-            std::vector<std::pair<size_t, size_t>> polygonMatches;
-            matching::polygonMatching(currentObs, refIds, prevObs, targIds, 5, polygonMatches);
-            consecutivePolyMatches[obsIdx] = polygonMatches;
-            
-            // Triangle Matching
-            std::vector<std::pair<size_t, size_t>> triangleMatches;
-            for (auto pMatch : polygonMatches) {
-                refIds = currentObs.H->get_children(pMatch.first);
-                targIds = prevObs.H->get_children(pMatch.second);
-                // std::vector<size_t> newTargIds = prevObs.H->new_get_children(pMatch.second);
 
+            std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
+
+            // Polygon Matching (Level 2)
+            matching::polygonMatching(currentObs, currentObs.H->get_children(0), prevObs, prevObs.H->get_children(0), 5, polygonMatches);
+            consecutivePolyMatches[obsIdx] = polygonMatches;
+
+            // Triangle Matching (Level 1)
+            for (const auto& [refPoly, targPoly] : polygonMatches) {
                 // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-                matching::polygonMatching(currentObs, refIds, prevObs, targIds, 5, triangleMatches);
+                matching::polygonMatching(currentObs, currentObs.H->get_children(refPoly), prevObs, prevObs.H->get_children(targPoly), 5, triangleMatches);
             }
             consecutiveTriMatches[obsIdx] = triangleMatches;
 
-            // Point Matching
-            std::vector<std::pair<vecPtT, vecPtT>> pointMatches;
-            std::set<size_t> unique_matches;
-            for (auto tMatch : triangleMatches) {
-                urquhart::Polygon rT = currentObs.H->get_vertex(tMatch.first), tT = prevObs.H->get_vertex(tMatch.second);
-                matching::linePointMatching(rT, tT, pointMatches, unique_matches);
-            }
+            // Vertex Matching (Level 0)
+            std::vector<std::pair<PtLoc, PtLoc>> pointMatches = matching::pointMatching(currentObs, prevObs, triangleMatches);
             consecutivePointMatches[obsIdx] = pointMatches;
         }
     }
@@ -285,7 +282,8 @@ class Path {
                 // Initialize new vectors to store observed trees in reference to the robot and global frames
                 std::vector<Tree> globalFrameTrees;
                 std::vector<Tree> localFrameTreeObservations;
-                PointVector localTrees;
+                // Points localTrees(2, 1);
+                Points localTrees; 
                 std::vector<Tree> odomFrameTreeObservations;
 
                 // The robot's base orientation is in +y direction
@@ -300,6 +298,7 @@ class Path {
                 // ===============
 
                 // Observe trees within the robot's vicinity
+                int localTreeCount=0;
                 for (const Tree& t : env) {
                     // Calculate the tree's position relative to the robot
                     // Record the true position of the tree relative to the global frame (for visualization purposes)
@@ -315,7 +314,8 @@ class Path {
                         // Rotate the position of the tree so that it is oriented correctly (relative to the robot's current frame)
                         Tree localTree(x*globCos - y*globSin, x*globSin + y*globCos, treeRadius);
                         localFrameTreeObservations.push_back(localTree);
-                        localTrees.push_back(std::vector<double>{localTree.p.x, localTree.p.y});
+                        localTrees.conservativeResize(2, ++localTreeCount);
+                        localTrees.col(localTreeCount-1) = Eigen::Vector2d{localTree.p.x, localTree.p.y};
 
                         // Translate the tree's position again to be relative to the robot's odometry
                         // In other words, find where this tree should lie on the robot's map

@@ -27,7 +27,10 @@ void writeHierarchyToFile(SimConfig cfg, const urquhart::Observation& trees, std
     
     // Iterate over the indices of the Polygons in the hierarchy
     for(auto pIdx : trees.H->get_children(trees.H->root)) {
-        for(auto ch : trees.H->graph[pIdx].points) plyOut << pIdx << " " << ch[0] << " " << ch[1] << "|";
+        for (int i = 0; i < trees.H->graph[pIdx].landmarkRefs.size(); ++i) {
+            auto myPoint =  trees.landmarks.col(trees.H->graph[pIdx].landmarkRefs(i));
+            plyOut << pIdx << " " << myPoint[0] << " " << myPoint[1] << "|";
+        }
         plyOut << std::endl;
         for(auto d : trees.H->graph[pIdx].descriptor) dscOut << d << " ";
         dscOut << std::endl;
@@ -35,8 +38,11 @@ void writeHierarchyToFile(SimConfig cfg, const urquhart::Observation& trees, std
         // Iterate over the indices of the Triangles that compose this Polygon
         for(auto tIdx : trees.H->traverse(pIdx)) {
             // Retain only the Polygon objects that have three sides
-            if (trees.H->graph[tIdx].points.size() == 3) {
-                for(auto ch : trees.H->graph[tIdx].points) triOut << tIdx << " " << ch[0] << " " << ch[1] << "|";
+            if (trees.H->graph[tIdx].n == 3) {
+                for (int i = 0; i < trees.H->graph[tIdx].landmarkRefs.size(); ++i) {
+                    auto myPoint = trees.landmarks.col(trees.H->graph[tIdx].landmarkRefs(i));
+                    triOut << tIdx << " " << myPoint[0] << " " << myPoint[1] << "|";
+                }
                 triOut << std::endl;
             }
         }
@@ -46,79 +52,20 @@ void writeHierarchyToFile(SimConfig cfg, const urquhart::Observation& trees, std
     dscOut.close();
 }
 
-// Substituted for original for type compatibility with my code
-void myPolygonMatching(
-    const urquhart::Observation &ref, std::vector<size_t> refIds,
-    const urquhart::Observation &targ, std::vector<size_t> targIds, double thresh,
-    std::vector<std::pair<size_t, size_t>> &polygonMatches) {
-    std::set<size_t> matched;
-    for (auto rIdx : refIds) {
-        size_t bestMatch = 0, bestDist = 100000;
-        urquhart::Polygon rp = ref.H->get_vertex(rIdx);
-        for (auto tIdx : targIds) {
-            urquhart::Polygon tp = targ.H->get_vertex(tIdx);
-            // if tIdx was not matched before and the difference of number of points is not larger than 5
-            if (matched.find(tIdx) == matched.end() &&
-                std::abs(int(rp.points.size() - tp.points.size())) <= 3)
-            {
-                double d = euclideanDistance(rp.descriptor, tp.descriptor);
-                if (d < bestDist) {
-                    bestDist = d;
-                    bestMatch = tIdx;
-                }
-            }
-        }
-
-        if (bestDist < thresh) {
-            matched.insert(bestMatch);
-            polygonMatches.push_back({rIdx, bestMatch});
-        }
-    }
-}
-
 void matchObs(const urquhart::Observation &ref, const urquhart::Observation &targ, double polyMatchThresh, double validPointMatchThresh,
-            std::vector<std::pair<size_t, size_t>> &polygonMatches, std::vector<std::pair<size_t, size_t>> &triangleMatches, std::vector<std::pair<vecPtT, vecPtT>> &vertexMatches) {
+            std::vector<std::pair<size_t, size_t>> &polygonMatches, std::vector<std::pair<size_t, size_t>> &triangleMatches, std::vector<std::pair<PtLoc, PtLoc>> &vertexMatches) {
 
     // Polygon Matching (Level 2)
-    // std::vector<size_t> refIds = ref.H->get_children(0), targIds = targ.H->get_children(0);
-    // matching::polygonMatching(ref, ref.H->get_children(0), targ, targ.H->get_children(0), thresh, polygonMatches);
-    myPolygonMatching(ref, ref.H->get_children(0), targ, targ.H->get_children(0), polyMatchThresh, polygonMatches);
+    matching::polygonMatching(ref, ref.H->get_children(0), targ, targ.H->get_children(0), polyMatchThresh, polygonMatches);
 
     // Triangle Matching (Level 1)
     for (auto pMatch : polygonMatches) {
-        // refIds = ref.H->get_children(pMatch.first), targIds = targ.H->get_children(pMatch.second);
         // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-        // matching::polygonMatching(ref, ref.H->get_children(pMatch.first), targ, targ.H->get_children(pMatch.second), thresh, triangleMatches);
-        myPolygonMatching(ref, ref.H->get_children(pMatch.first), targ, targ.H->get_children(pMatch.second), polyMatchThresh, triangleMatches);
+        matching::polygonMatching(ref, ref.H->get_children(pMatch.first), targ, targ.H->get_children(pMatch.second), polyMatchThresh, triangleMatches);
     }
 
     // Vertex Matching (Level 0)
-    std::set<size_t> uniqueMatches;
-    for (auto tMatch : triangleMatches) {   // FIXME? make the loop explicitly over constant references?
-        urquhart::Polygon refTriangle = ref.H->get_vertex(tMatch.first), targTriangle = targ.H->get_vertex(tMatch.second);
-        std::vector<size_t> chi = {0, 1, 2}, bestPermutation;
-
-        // TODO change the edgeLengths to do squared distance instead of euclidean distance (unnecessary square root)
-
-        // Permute the edges to find the best match between the triangles
-        double bestDist = 1000000;
-        do {
-            double d = euclideanDistance(refTriangle.edgeLengths, std::vector<double>{targTriangle.edgeLengths[chi[0]], targTriangle.edgeLengths[chi[1]], targTriangle.edgeLengths[chi[2]]});
-            if (d < bestDist) {
-                bestDist = d;
-                bestPermutation = chi;
-            }
-        } while (std::next_permutation(chi.begin(), chi.end()));
-
-        for (size_t i = 0; i < 3; ++i) {
-            int refIdx = (i+2)%3, targIdx = (bestPermutation[i]+2)%3;
-            size_t uid = cantorPairing(refTriangle.edges[refIdx].first, targTriangle.edges[targIdx].first);
-            if (uniqueMatches.find(uid) == uniqueMatches.end()) {
-                vertexMatches.push_back({refTriangle.points[refIdx], targTriangle.points[targIdx]});
-                uniqueMatches.insert(uid);
-            }
-        }
-    }
+    vertexMatches = matching::pointMatching(ref, targ, triangleMatches);
 }
 
 
@@ -248,9 +195,10 @@ int main(int argc, char* argv[]) {
                 std::cout << ++r.currentObsIdx << ": Observed environment at sensor range " << nextObs.obsRange << std::endl;
 
                 // Define geometric hierarchy
-                PointVector vectorOfTrees;
-                for (const auto& t : nextObs.treePositions) vectorOfTrees.push_back(std::vector<double>{t.p.x, t.p.y});
-                myObs = new urquhart::Observation(vectorOfTrees);
+                Points treeXYs(2, nextObs.treePositions.size());
+                int idx = 0;
+                for (const auto& t : nextObs.treePositions) treeXYs.col(idx++) = Eigen::Vector2d{t.p.x, t.p.y};
+                myObs = new urquhart::Observation(treeXYs);
 
                 // Save hierarchy data to files
                 writeObservationToFile(cfg.localPointsPath+std::to_string(nextObs.obsRange), nextObs.treePositions);
@@ -262,7 +210,7 @@ int main(int argc, char* argv[]) {
                 auto rIter = myRanges.begin();
                 for (auto ghIter = geoHiers.begin(); ghIter != geoHiers.end(); ++rIter, ++ghIter) {
                     std::vector<std::pair<size_t, size_t>> pM, tM;
-                    std::vector<std::pair<vecPtT, vecPtT>> ptM;
+                    std::vector<std::pair<PtLoc, PtLoc>> ptM;
                     std::cout << r.currentObsIdx << ": Attempting to match observations at range " << *rIter << " with the one at " << nextObs.obsRange << std::endl;
                     matchObs(**ghIter, *myObs, 5, 5, pM, tM, ptM);
                     std::string mapKey = std::to_string(*rIter) +"-"+ std::to_string(nextObs.obsRange)+".txt";

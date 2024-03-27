@@ -7,7 +7,7 @@
 #include <tuple>
 #include <utility>
 #include <math.h>
-#include "eigen3/Eigen/Dense" // References new version of Eigen (3.4.90)
+#include <eigen3/Eigen/Dense> // References new version of Eigen (3.4.90)
 
 using EdgeSet = Eigen::Matrix2Xi;
 using Points = Eigen::Matrix2Xd;

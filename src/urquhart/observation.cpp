@@ -3,7 +3,7 @@
 namespace urquhart {
 
 Observation::Observation(Points& freshLandmarks) {
-    landmarks = freshLandmarks;
+    landmarks = Eigen::Ref<Points>(freshLandmarks);
     std::vector<Polygon> triangles;
     delaunayTriangulationFromScratch(triangles);
     H = new Tree(triangles);

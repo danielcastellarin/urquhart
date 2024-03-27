@@ -1,7 +1,6 @@
 #pragma once
 
 #include <tree.hpp>
-// #include <map>
 
 #include "libqhullcpp/RboxPoints.h"
 #include "libqhullcpp/QhullError.h"
@@ -52,5 +51,7 @@ namespace urquhart {
             Polygon mergePolygons_(Polygon& p, Polygon& n, int edgeIndexInP);
             
             void printPolygon(const Polygon& p);
+
+            Points* getPolygonPoints(const Polygon& p);
     };
 }
