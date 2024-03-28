@@ -7,6 +7,14 @@
 #include <tuple>
 #include <utility>
 #include <math.h>
+#include <memory>
+#include <random>
+#include <unordered_map>
+#include <queue>
+#include <unordered_set>
+#include <set>
+#include <map>
+#include <filesystem>
 #include <eigen3/Eigen/Dense> // References new version of Eigen (3.4.90)
 
 using EdgeSet = Eigen::Matrix2Xi;

@@ -22,25 +22,25 @@ void writeObservationToFile(std::string filePath, const std::vector<Tree>& trees
 void writeHierarchyToFile(SimConfig cfg, const urquhart::Observation& trees, std::string fileName) {
     std::ofstream plyOut(cfg.polyPolyPath+fileName), triOut(cfg.polyTriPath+fileName), 
                     hieOut(cfg.polyHierPath+fileName), dscOut(cfg.polyDescPath+fileName);
-    write_graphviz(hieOut, trees.H->graph);
+    trees.hier->viewTree(hieOut);
     hieOut.close();
     
     // Iterate over the indices of the Polygons in the hierarchy
-    for(auto pIdx : trees.H->get_children(trees.H->root)) {
-        for (int i = 0; i < trees.H->graph[pIdx].landmarkRefs.size(); ++i) {
-            auto myPoint =  trees.landmarks.col(trees.H->graph[pIdx].landmarkRefs(i));
+    for(auto pIdx : trees.hier->getChildrenIds(0)) {
+        for (int i = 0; i < trees.hier->getPolygon(pIdx).landmarkRefs.size(); ++i) {
+            auto myPoint =  trees.landmarks.col(trees.hier->getPolygon(pIdx).landmarkRefs(i));
             plyOut << pIdx << " " << myPoint[0] << " " << myPoint[1] << "|";
         }
         plyOut << std::endl;
-        for(auto d : trees.H->graph[pIdx].descriptor) dscOut << d << " ";
+        for(auto d : trees.hier->getPolygon(pIdx).descriptor) dscOut << d << " ";
         dscOut << std::endl;
         
         // Iterate over the indices of the Triangles that compose this Polygon
-        for(auto tIdx : trees.H->traverse(pIdx)) {
+        for(auto tIdx : trees.hier->getChildrenIds(pIdx)) {
             // Retain only the Polygon objects that have three sides
-            if (trees.H->graph[tIdx].n == 3) {
-                for (int i = 0; i < trees.H->graph[tIdx].landmarkRefs.size(); ++i) {
-                    auto myPoint = trees.landmarks.col(trees.H->graph[tIdx].landmarkRefs(i));
+            if (trees.hier->getPolygon(tIdx).n == 3) {
+                for (int i = 0; i < trees.hier->getPolygon(tIdx).landmarkRefs.size(); ++i) {
+                    auto myPoint = trees.landmarks.col(trees.hier->getPolygon(tIdx).landmarkRefs(i));
                     triOut << tIdx << " " << myPoint[0] << " " << myPoint[1] << "|";
                 }
                 triOut << std::endl;
@@ -56,16 +56,18 @@ void matchObs(const urquhart::Observation &ref, const urquhart::Observation &tar
             std::vector<std::pair<size_t, size_t>> &polygonMatches, std::vector<std::pair<size_t, size_t>> &triangleMatches, std::vector<std::pair<PtLoc, PtLoc>> &vertexMatches) {
 
     // Polygon Matching (Level 2)
-    matching::polygonMatching(ref, ref.H->get_children(0), targ, targ.H->get_children(0), polyMatchThresh, polygonMatches);
+    matching::polygonMatching(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), polyMatchThresh, polygonMatches);
 
     // Triangle Matching (Level 1)
     for (auto pMatch : polygonMatches) {
         // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-        matching::polygonMatching(ref, ref.H->get_children(pMatch.first), targ, targ.H->get_children(pMatch.second), polyMatchThresh, triangleMatches);
+        matching::polygonMatching(ref, ref.hier->getChildrenIds(pMatch.first), targ, targ.hier->getChildrenIds(pMatch.second), polyMatchThresh, triangleMatches);
     }
 
     // Vertex Matching (Level 0)
-    vertexMatches = matching::pointMatching(ref, targ, triangleMatches);
+    for (const auto& [refIdx, targIdx] : matching::pointIndexMatching(ref, targ, triangleMatches)) {
+        vertexMatches.push_back({ref.landmarks.col(refIdx), targ.landmarks.col(targIdx)});
+    }
 }
 
 
@@ -150,9 +152,10 @@ int main(int argc, char* argv[]) {
         ros::init(argc, argv, "obs_ranger");
         ros::NodeHandle n("~");
         SimConfig cfg(n);
-        cfg.outputConfig(std::cout);
+        std::cout << "bing bong" << std::endl;
+        // cfg.outputConfig(std::cout);
         int numObs = cfg.obsRanges.size();
-        std::cout << "Observation count: " << cfg.obsRanges.size() << std::endl;
+        // std::cout << "Observation count: " << cfg.obsRanges.size() << std::endl;
         ros::Rate pub_rate(100);
 
         // Initialize the path through the forest 
@@ -182,7 +185,7 @@ int main(int argc, char* argv[]) {
         if (r.validateStartingPose()) {
             std::cout << "Robot observe trees from stationary pose (x y theta): " << r.globalPose.printPose() << std::endl << std::endl;
 
-            // Also save this run's configuration
+            // // Also save this run's configuration
             std::ofstream configOut(cfg.outputDirPath+"/!config.txt");
             cfg.givenStartPose = true;  // hack
             cfg.initialPose = r.globalPose;
@@ -197,13 +200,13 @@ int main(int argc, char* argv[]) {
                 // Define geometric hierarchy
                 Points treeXYs(2, nextObs.treePositions.size());
                 int idx = 0;
-                for (const auto& t : nextObs.treePositions) treeXYs.col(idx++) = Eigen::Vector2d{t.p.x, t.p.y};
+                for (const auto& t : nextObs.treePositions) treeXYs.col(idx++) = PtLoc{t.p.x, t.p.y};
                 myObs = new urquhart::Observation(treeXYs);
 
                 // Save hierarchy data to files
                 writeObservationToFile(cfg.localPointsPath+std::to_string(nextObs.obsRange), nextObs.treePositions);
                 std::cout << r.currentObsIdx << ": Written observation to file" << std::endl;
-                writeHierarchyToFile(cfg, *myObs, std::to_string(nextObs.obsRange)+".txt");
+                // writeHierarchyToFile(cfg, *myObs, std::to_string(nextObs.obsRange)+".txt");
                 std::cout << r.currentObsIdx << ": Written geometric hierarchy to file" << std::endl;
 
                 // Try matching previous observations with this one, save the output in files 

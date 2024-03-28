@@ -97,14 +97,14 @@ int main(int argc, char* argv[]) {
         }
         pts2Out.close();
 
-        std::ofstream matOut(num+"-m.txt");
         std::cout << "Matching Time: " << std::endl;
-        auto matches = matching::hierarchyMatching(obs1, obs2, 5);
-        for (const auto& [refPoint, targPoint] : matches) {
-            std::cout << refPoint(0) << "," << refPoint(1) << "|";
-            std::cout << targPoint(0) << "," << targPoint(1) << std::endl;
-            matOut << refPoint(0) << "," << refPoint(1) << "|";
-            matOut << targPoint(0) << "," << targPoint(1) << std::endl;
+        auto matches = matching::hierarchyIndexMatching(obs1, obs2, 5);
+        std::ofstream matOut(num+"-m.txt");
+        for (const auto& [refIdx, targIdx] : matches) {
+            std::cout << obs1.ldmkX(refIdx) << "," << obs1.ldmkY(refIdx) << "|";
+            std::cout << obs2.ldmkX(targIdx) << "," << obs2.ldmkY(targIdx) << std::endl;
+            matOut << obs1.ldmkX(refIdx) << "," << obs1.ldmkY(refIdx) << "|";
+            matOut << obs2.ldmkX(targIdx) << "," << obs2.ldmkY(targIdx) << std::endl;
         }
         matOut.close();
         return 0;

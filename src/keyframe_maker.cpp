@@ -87,20 +87,20 @@ pcl::PointXY pclConvert(Eigen::Vector4d p) {
     myPoint.x = p[0]; myPoint.y = p[1];
     return myPoint;
 }
-// boop
 
 // first values are points from reference frame, second values are points from target frame
-Eigen::Matrix4d computeRigid2DEuclidTf(std::vector<std::pair<PtLoc, PtLoc>> pointPairs) {
-    Eigen::MatrixXd A(pointPairs.size()+pointPairs.size(), 4);
-    Eigen::VectorXd b(pointPairs.size()+pointPairs.size());
+Eigen::Matrix4d computeRigid2DEuclidTfFromIndices(const std::vector<std::pair<Eigen::Index, Eigen::Index>>& ldmkIndexPairs,
+                                                const urquhart::Observation &ref, const urquhart::Observation &targ) {
+    Eigen::MatrixXd A(ldmkIndexPairs.size()+ldmkIndexPairs.size(), 4);
+    Eigen::VectorXd b(ldmkIndexPairs.size()+ldmkIndexPairs.size());
 
     // https://math.stackexchange.com/questions/77462/finding-transformation-matrix-between-two-2d-coordinate-frames-pixel-plane-to
     int startRow = 0;
-    for (auto& [refP, targP] : pointPairs) {
-        A.row(startRow)   = (Eigen::Vector4d() << refP(0), -refP(1), 1, 0).finished().transpose();
-        A.row(startRow+1) = (Eigen::Vector4d() << refP(1),  refP(0), 0, 1).finished().transpose();
-        b[startRow]   = targP(0);
-        b[startRow+1] = targP(1);
+    for (const auto& [refIdx, targIdx] : ldmkIndexPairs) {
+        A.row(startRow)   = (Eigen::Vector4d() << ref.ldmkX(refIdx), -ref.ldmkY(refIdx), 1, 0).finished().transpose();
+        A.row(startRow+1) = (Eigen::Vector4d() << ref.ldmkY(refIdx),  ref.ldmkX(refIdx), 0, 1).finished().transpose();
+        b[startRow]   = targ.ldmkX(targIdx);
+        b[startRow+1] = targ.ldmkY(targIdx);
         startRow += 2;
     }
 
@@ -117,14 +117,14 @@ Eigen::Matrix4d computeRigid2DEuclidTf(std::vector<std::pair<PtLoc, PtLoc>> poin
     return tf;
 }
 
-std::vector<std::pair<PtLoc, PtLoc>> matchObs(const urquhart::Observation &ref, const urquhart::Observation &targ, double polyMatchThresh, double validPointMatchThresh) {
+std::vector<std::pair<Eigen::Index, Eigen::Index>> matchObsIdx(const urquhart::Observation &ref, const urquhart::Observation &targ, double polyMatchThresh, double validPointMatchThresh) {
 
     // Perform traditional data association 
-    std::vector<std::pair<PtLoc, PtLoc>> vertexMatches = matching::hierarchyMatching(ref, targ, polyMatchThresh);
+    std::vector<std::pair<Eigen::Index, Eigen::Index>> vertexMatches = matching::hierarchyIndexMatching(ref, targ, polyMatchThresh);
 
     // Post-process: double-check matches, remove any where pairs are not certain distance from each other
     for (auto iter = vertexMatches.begin(); iter != vertexMatches.end(); ++iter) {
-        if (std::abs(iter->first(0) - iter->second(0)) > validPointMatchThresh || std::abs(iter->first(1) - iter->second(1)) > validPointMatchThresh)
+        if (std::abs(ref.ldmkX(iter->first) - targ.ldmkX(iter->second)) > validPointMatchThresh || std::abs(ref.ldmkY(iter->first) - targ.ldmkY(iter->second)) > validPointMatchThresh)
             vertexMatches.erase(iter);
     }
     // arrogance check: if matched points across differential observations are not very close, then the match is probably wrong 
@@ -160,29 +160,29 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
     // Try to match the current frame with any that have been associated with a base frame
     if (!kfObs.empty()) {
-        std::vector<std::pair<PtLoc, PtLoc>> pointMatches;
+        std::vector<std::pair<Eigen::Index, Eigen::Index>> pointMatchIndices;
         std::cout << "Matching frame " << myObs.frameId << " with associated clouds." << std::endl;
         
         // Match (current frame --> associated frame) until match found
         auto revKfIter = kfObs.rbegin();
         do {
-            pointMatches = matchObs(myObs.obs, revKfIter->obs, 5, 1.5);
-        } while (pointMatches.size() < 2 && ++revKfIter != kfObs.rend());
+            pointMatchIndices = matchObsIdx(myObs.obs, revKfIter->obs, 5, 1.5);
+        } while (pointMatchIndices.size() < 2 && ++revKfIter != kfObs.rend());
 
         // Store observation data
-        if (pointMatches.size() < 2) { unassociatedObs.push_back(myObs); std::cout << "No matches found." << std::endl;
+        if (pointMatchIndices.size() < 2) { unassociatedObs.push_back(myObs); std::cout << "No matches found." << std::endl;
         } else {
             // Estimate tf from reference to target frame (assuming we have gotten rid of outliers already)
             std::cout << "Found match with frame " << revKfIter->frameId << ", associating..." << std::endl;
-            tfCloud(revKfIter->tf, computeRigid2DEuclidTf(pointMatches), myObs);
+            tfCloud(revKfIter->tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, myObs.obs, revKfIter->obs), myObs);
 
             // Try to match all unassociated observations with the current observation
             auto obsIter = unassociatedObs.begin();
             while (obsIter != unassociatedObs.end()) {
-                pointMatches = matchObs(obsIter->obs, myObs.obs, 5, 1.5);
-                if (pointMatches.size() >= 2) {
+                pointMatchIndices = matchObsIdx(obsIter->obs, myObs.obs, 5, 1.5);
+                if (pointMatchIndices.size() >= 2) {
                     std::cout << "Also matched with frame " << obsIter->frameId << std::endl;
-                    tfCloud(myObs.tf, computeRigid2DEuclidTf(pointMatches), *obsIter);
+                    tfCloud(myObs.tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, obsIter->obs, myObs.obs), *obsIter);
                     obsIter = unassociatedObs.erase(obsIter);
                 }
                 else ++obsIter;
@@ -190,17 +190,17 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         }
 
     } else if (!unassociatedObs.empty()) {  // Try to match the current frame with any unassociated frames
-        std::vector<std::pair<PtLoc, PtLoc>> pointMatches;
+        std::vector<std::pair<Eigen::Index, Eigen::Index>> pointMatchIndices;
         std::cout << "Trying to find base frame for frame " << myObs.frameId << std::endl;
 
         // Match (current frame --> latest unassociated frame) until match found
         auto revIter = unassociatedObs.rbegin();
         do {
-            pointMatches = matchObs(myObs.obs, revIter->obs, 5, 1.5);
-        } while (pointMatches.size() < 2 && ++revIter != unassociatedObs.rend());
+            pointMatchIndices = matchObsIdx(myObs.obs, revIter->obs, 5, 1.5);
+        } while (pointMatchIndices.size() < 2 && ++revIter != unassociatedObs.rend());
 
         // Store observation data
-        if (pointMatches.size() < 2) { unassociatedObs.push_back(myObs); std::cout << "None found." << std::endl;
+        if (pointMatchIndices.size() < 2) { unassociatedObs.push_back(myObs); std::cout << "None found." << std::endl;
         } else {
             // Assign the target frame of this match as the base of the keyframe
             revIter->tf = Eigen::Matrix4d::Identity();
@@ -209,7 +209,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
             // Estimate tf from reference to target frame (assuming we have gotten rid of outliers already)
             std::cout << "Base frame found at frame " << revIter->frameId << ", adding frame " << myObs.frameId << " behind it." << std::endl;
-            tfCloud(revIter->tf, computeRigid2DEuclidTf(pointMatches), myObs);
+            tfCloud(revIter->tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, myObs.obs, revIter->obs), myObs);
             
             // Remove the base frame from the unassociated list and advance the iterator
             std::advance(revIter, 1);
@@ -217,10 +217,10 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
             // For every remaining unassociated observation, try to match with the current observation
             while (revIter != unassociatedObs.rend()) {
-                pointMatches = matchObs(revIter->obs, myObs.obs, 5, 1.5);
-                if (pointMatches.size() >= 2) {
+                pointMatchIndices = matchObsIdx(revIter->obs, myObs.obs, 5, 1.5);
+                if (pointMatchIndices.size() >= 2) {
                     std::cout << "Including frame " << revIter->frameId << " in the association." << std::endl;
-                    tfCloud(myObs.tf, computeRigid2DEuclidTf(pointMatches), *revIter);
+                    tfCloud(myObs.tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, revIter->obs, myObs.obs), *revIter);
                     unassociatedObs.erase(std::next(revIter).base()); // iterator should not move
                 }
                 else ++revIter;

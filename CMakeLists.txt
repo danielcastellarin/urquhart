@@ -58,16 +58,16 @@ catkin_package(
 
 
 # Non ROS robot path simulation
-# add_executable(ForestSim
-#     src/my_old/path.cpp
-#     src/urquhart/observation.cpp
-#     src/urquhart/tree.cpp
-#     src/urquhart/descriptor.cpp
-#     src/urquhart/matching.cpp
-#     )
-# target_include_directories(ForestSim PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
-# target_link_libraries(ForestSim PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
-# SET_TARGET_PROPERTIES(ForestSim PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
+add_executable(ForestSim
+    src/my_old/path.cpp
+    src/urquhart/observation.cpp
+    src/urquhart/hierarchy.cpp
+    src/urquhart/descriptor.cpp
+    src/urquhart/matching.cpp
+    )
+target_include_directories(ForestSim PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
+target_link_libraries(ForestSim PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
+SET_TARGET_PROPERTIES(ForestSim PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
 
 
 # Non ROS forest generator
@@ -88,17 +88,16 @@ add_executable(Stu src/stupid.cpp)
 
 
 # Match observations with varying sensor ranges
-# add_executable(ObsRanger
-#     src/obs_range_testing.cpp
-#     src/urquhart/observation.cpp
-#     src/urquhart/hierarchy.cpp
-#     src/urquhart/tree.cpp
-#     src/urquhart/descriptor.cpp
-#     src/urquhart/matching.cpp
-#     )
-# target_include_directories(ObsRanger PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
-# target_link_libraries(ObsRanger PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
-# SET_TARGET_PROPERTIES(ObsRanger PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
+add_executable(ObsRanger
+    src/obs_range_testing.cpp
+    src/urquhart/observation.cpp
+    src/urquhart/hierarchy.cpp
+    src/urquhart/descriptor.cpp
+    src/urquhart/matching.cpp
+    )
+target_include_directories(ObsRanger PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
+target_link_libraries(ObsRanger PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
+SET_TARGET_PROPERTIES(ObsRanger PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
 
 add_executable(OutExample
     example/out_example.cpp
@@ -124,43 +123,43 @@ target_link_libraries(UrquhartExample PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} $
 SET_TARGET_PROPERTIES(UrquhartExample PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
 
 # Geometric Hierarchy Example Construction and Matching for Two Simulated Observations
-# add_executable(MyExample
-#     example/other_form_example.cpp
-#     src/urquhart/observation.cpp  
-#     src/urquhart/tree.cpp  
-#     src/urquhart/descriptor.cpp  
-#     src/urquhart/matching.cpp  
-#     )
-# target_include_directories(MyExample PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
-# target_link_libraries(MyExample PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
-# SET_TARGET_PROPERTIES(MyExample PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
+add_executable(MyExample
+    example/other_form_example.cpp
+    src/urquhart/observation.cpp  
+    src/urquhart/hierarchy.cpp 
+    src/urquhart/descriptor.cpp  
+    src/urquhart/matching.cpp  
+    )
+target_include_directories(MyExample PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
+target_link_libraries(MyExample PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
+SET_TARGET_PROPERTIES(MyExample PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
 
 
 
 # Local Bundle Adjustment Node
 # PCL takes a minute to compile, so only uncomment when actively developing
-# add_executable(KeyframeGen
-#     src/keyframe_maker.cpp
-#     src/urquhart/observation.cpp
-#     src/urquhart/tree.cpp
-#     src/urquhart/descriptor.cpp
-#     src/urquhart/matching.cpp
-#     )
-# target_include_directories(KeyframeGen PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
-# # target_link_libraries(KeyframeGen PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
-# target_link_libraries(KeyframeGen PUBLIC ${PCL_LIBRARIES} ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
-# SET_TARGET_PROPERTIES(KeyframeGen PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
+add_executable(KeyframeGen
+    src/keyframe_maker.cpp
+    src/urquhart/observation.cpp
+    src/urquhart/hierarchy.cpp
+    src/urquhart/descriptor.cpp
+    src/urquhart/matching.cpp
+    )
+target_include_directories(KeyframeGen PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
+# target_link_libraries(KeyframeGen PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
+target_link_libraries(KeyframeGen PUBLIC ${PCL_LIBRARIES} ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
+SET_TARGET_PROPERTIES(KeyframeGen PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
 
 
 # GraphSLAM Node
 # PCL takes a minute to compile, so only uncomment when actively developing
-# add_executable(PolygonSLAM
-#     src/graph_builder.cpp
-#     src/urquhart/observation.cpp
-#     src/urquhart/tree.cpp
-#     src/urquhart/descriptor.cpp
-#     src/urquhart/matching.cpp
-#     )
-# target_include_directories(PolygonSLAM PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
-# target_link_libraries(PolygonSLAM PUBLIC ${PCL_LIBRARIES} ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
-# SET_TARGET_PROPERTIES(PolygonSLAM PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
+add_executable(PolygonSLAM
+    src/graph_builder.cpp
+    src/urquhart/observation.cpp
+    src/urquhart/hierarchy.cpp
+    src/urquhart/descriptor.cpp
+    src/urquhart/matching.cpp
+    )
+target_include_directories(PolygonSLAM PUBLIC include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
+target_link_libraries(PolygonSLAM PUBLIC ${PCL_LIBRARIES} ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhullLibs} ${catkin_LIBRARIES})
+SET_TARGET_PROPERTIES(PolygonSLAM PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")

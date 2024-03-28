@@ -1,5 +1,4 @@
 #include <matching.hpp>
-#include <observation.hpp>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -49,10 +48,10 @@ int main(int argc, char* argv[]) {
         obs2.view();
 
         std::cout << "Matching Time: " << std::endl;
-        auto matches = matching::hierarchyMatching(obs1, obs2, 5);
-        for (const auto& [refPoint, targPoint] : matches) {
-            std::cout << refPoint(0) << "," << refPoint(1) << "|";
-            std::cout << targPoint(0) << "," << targPoint(1) << std::endl;
+        auto matches = matching::hierarchyIndexMatching(obs1, obs2, 5);
+        for (const auto& [refIdx, targIdx] : matches) {
+            std::cout << obs1.ldmkX(refIdx) << "," << obs1.ldmkY(refIdx) << "|";
+            std::cout << obs2.ldmkX(targIdx) << "," << obs2.ldmkY(targIdx) << std::endl;
         }
         return 0;
 

@@ -29,25 +29,25 @@ void writeHierarchyToFile(std::string fileName, const urquhart::Observation& tre
     std::ofstream plyOut(buildFilePath(dirName+"/p", fileName)), triOut(buildFilePath(dirName+"/t", fileName)), hieOut(buildFilePath(dirName+"/h", fileName));
     std::ofstream dscOut(buildFilePath(dirName+"/d", fileName));
 
-    write_graphviz(hieOut, trees.H->graph);
+    trees.hier->viewTree(hieOut);
     hieOut.close();
     
     // Iterate over the indices of the Polygons in the hierarchy
-    for(auto pIdx : trees.H->get_children(trees.H->root)) {
-        for (int i = 0; i < trees.H->graph[pIdx].landmarkRefs.size(); ++i) {
-            auto myPoint =  trees.landmarks.col(trees.H->graph[pIdx].landmarkRefs(i));
+    for(auto pIdx : trees.hier->getChildrenIds(0)) {
+        for (int i = 0; i < trees.hier->getPolygon(pIdx).landmarkRefs.size(); ++i) {
+            auto myPoint =  trees.landmarks.col(trees.hier->getPolygon(pIdx).landmarkRefs(i));
             plyOut << pIdx << " " << myPoint[0] << " " << myPoint[1] << "|";
         }
         plyOut << std::endl;
-        for(auto d : trees.H->graph[pIdx].descriptor) dscOut << d << " ";
+        for(auto d : trees.hier->getPolygon(pIdx).descriptor) dscOut << d << " ";
         dscOut << std::endl;
         
         // Iterate over the indices of the Triangles that compose this Polygon
-        for(auto tIdx : trees.H->traverse(pIdx)) {
+        for(auto tIdx : trees.hier->getChildrenIds(pIdx)) {
             // Retain only the Polygon objects that have three sides
-            if (trees.H->graph[tIdx].n == 3) {
-                for (int i = 0; i < trees.H->graph[tIdx].landmarkRefs.size(); ++i) {
-                    auto myPoint = trees.landmarks.col(trees.H->graph[tIdx].landmarkRefs(i));
+            if (trees.hier->getPolygon(tIdx).n == 3) {
+                for (int i = 0; i < trees.hier->getPolygon(tIdx).landmarkRefs.size(); ++i) {
+                    auto myPoint = trees.landmarks.col(trees.hier->getPolygon(tIdx).landmarkRefs(i));
                     triOut << tIdx << " " << myPoint[0] << " " << myPoint[1] << "|";
                 }
                 triOut << std::endl;
@@ -138,18 +138,21 @@ struct RobotHistory
             std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
 
             // Polygon Matching (Level 2)
-            matching::polygonMatching(currentObs, currentObs.H->get_children(0), prevObs, prevObs.H->get_children(0), 5, polygonMatches);
+            matching::polygonMatching(currentObs, currentObs.hier->getChildrenIds(0), prevObs, prevObs.hier->getChildrenIds(0), 5, polygonMatches);
             consecutivePolyMatches[obsIdx] = polygonMatches;
 
             // Triangle Matching (Level 1)
             for (const auto& [refPoly, targPoly] : polygonMatches) {
                 // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-                matching::polygonMatching(currentObs, currentObs.H->get_children(refPoly), prevObs, prevObs.H->get_children(targPoly), 5, triangleMatches);
+                matching::polygonMatching(currentObs, currentObs.hier->getChildrenIds(refPoly), prevObs, prevObs.hier->getChildrenIds(targPoly), 5, triangleMatches);
             }
             consecutiveTriMatches[obsIdx] = triangleMatches;
 
             // Vertex Matching (Level 0)
-            std::vector<std::pair<PtLoc, PtLoc>> pointMatches = matching::pointMatching(currentObs, prevObs, triangleMatches);
+            std::vector<std::pair<PtLoc, PtLoc>> pointMatches; 
+            for (const auto& [refIdx, targIdx] : matching::pointIndexMatching(currentObs, prevObs, triangleMatches)) {
+                pointMatches.push_back({currentObs.landmarks.col(refIdx), prevObs.landmarks.col(targIdx)});
+            }
             consecutivePointMatches[obsIdx] = pointMatches;
         }
     }

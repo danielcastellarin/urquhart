@@ -234,4 +234,8 @@ void Observation::delaunayTriangulationFromScratch(std::vector<Polygon>& polygon
 };
 
 
+const PtLoc& Observation::ldmk(Eigen::Index colNum) const { return landmarks.col(colNum); }
+const double& Observation::ldmkX(Eigen::Index colNum) const { return landmarks(0, colNum); }
+const double& Observation::ldmkY(Eigen::Index colNum) const { return landmarks(1, colNum); }
+const Points& Observation::ldmks(Eigen::VectorXi indices) const { return landmarks(Eigen::placeholders::all, indices); }
 } // urquhart

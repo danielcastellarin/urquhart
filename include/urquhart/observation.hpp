@@ -1,6 +1,5 @@
 #pragma once
 
-#include <tree.hpp>
 #include <hierarchy.hpp>
 
 #include "libqhullcpp/RboxPoints.h"
@@ -46,6 +45,11 @@ namespace urquhart {
             // TODO: hier should be private and have accessors
             Hierarchy* hier = NULL;
             // std::shared_ptr<Hierarchy> hier;
+
+            const PtLoc& ldmk(Eigen::Index colNum) const;
+            const double& ldmkX(Eigen::Index colNum) const;
+            const double& ldmkY(Eigen::Index colNum) const;
+            const Points& ldmks(Eigen::VectorXi indices) const;
 
         private:
             // Computes a Delaunay triangulation using QHull from a set of landmarks.

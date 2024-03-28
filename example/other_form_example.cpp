@@ -34,20 +34,20 @@ int main(int argc, char* argv[]) {
         Points points1(2, getNumPoints(string(argv[1])));
         readCoolFile(string(argv[1]), points1);
         urquhart::Observation obs1(points1);
-        std::cout << "Obs 1 Polygons: " << obs1.H->get_children(0).size() << std::endl;
+        std::cout << "Obs 1 Polygons: " << obs1.hier->getChildrenIds(0).size() << std::endl;
         // obs1.view();
 
         Points points2(2, getNumPoints(string(argv[2])));
         readCoolFile(string(argv[2]), points2);
         urquhart::Observation obs2(points2);
-        std::cout << "Obs 2 Polygons: " << obs2.H->get_children(0).size() << std::endl;
+        std::cout << "Obs 2 Polygons: " << obs2.hier->getChildrenIds(0).size() << std::endl;
         // obs2.view();
 
         std::cout << "Matching Time: " << std::endl;
-        auto matches = matching::hierarchyMatching(obs1, obs2, 5);
-        for (const auto& [refPoint, targPoint] : matches) {
-            std::cout << refPoint(0) << "," << refPoint(1) << "|";
-            std::cout << targPoint(0) << "," << targPoint(1) << std::endl;
+        auto matches = matching::hierarchyIndexMatching(obs1, obs2, 5);
+        for (const auto& [refIdx, targIdx] : matches) {
+            std::cout << obs1.ldmkX(refIdx) << "," << obs1.ldmkY(refIdx) << "|";
+            std::cout << obs2.ldmkX(targIdx) << "," << obs2.ldmkY(targIdx) << std::endl;
         }
         return 0;
 
