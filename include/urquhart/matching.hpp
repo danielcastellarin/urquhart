@@ -13,8 +13,8 @@ namespace matching
     // Matches polygons (works for triangles as well). This function does a greedy assignment
     // based on the euclidean distance of the DFT descriptors. The distance to the best match must be under thresh to be accepted
     void polygonMatching(
-        const urquhart::Observation &ref, std::vector<size_t> refIds,
-        const urquhart::Observation &targ, std::vector<size_t> targIds, double thresh,
+        const urquhart::Observation &ref, std::unordered_set<int> refIds,
+        const urquhart::Observation &targ, std::unordered_set<int> targIds, double thresh,
         std::vector<std::pair<size_t, size_t>> &polygonMatches);
 
     // Matches a pair of observations. Returns a vector of tuples of points that were considered matches.

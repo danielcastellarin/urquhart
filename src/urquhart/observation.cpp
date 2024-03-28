@@ -17,7 +17,10 @@ Observation::Observation(std::vector<std::vector<double>>& freshLandmarks) {
     computeHierarchy();
 };
 
-void Observation::view() { H->view_h2_polygons(); }
+Observation::~Observation() { delete hier; }
+
+void Observation::view() { hier->viewPolygons(std::cout); }
+
 
 void Observation::computeHierarchy() {
 
@@ -29,7 +32,9 @@ void Observation::computeHierarchy() {
     // Initialize hierarchy with Delaunay triangulation
     std::vector<Polygon> triangles;
     delaunayTriangulationFromScratch(triangles);
-    H = new Tree(triangles); // TODO use shared pointer here?
+
+    if (hier != NULL) delete hier;
+    hier = new Hierarchy(triangles); // TODO use shared pointer here?
 
     // Merge triangles into new polygons by removing their longest edges
     urquhartTesselation_();
@@ -41,13 +46,12 @@ void Observation::recomputeEdgeLengths() {
     }
 }
 
-// std::vector<size_t> Observation::getCurrentAndChildren() { return H->view_h2_polygons(); }
 
 void Observation::urquhartTesselation_() {
-    for (size_t leaf : H->traverse()) {
+    for (const auto& leaf : hier->getChildrenIds(0)) {
 
         // Identify the longest edge of this triangle
-        Polygon p = H->get_vertex(leaf);
+        Polygon p = hier->getPolygon(leaf);
         int neighId = -1, longestEdgeIdx = -1;
         double longestEdgeLen = -1;
         for (int i=0; i < p.n; ++i) {
@@ -64,19 +68,19 @@ void Observation::urquhartTesselation_() {
         if (neighId == -1) continue;
 
         // If these two triangles have not already been merged with each other, continue
-        size_t leafAncestorIdx = H->get_ancestor(leaf), neighAncestorIdx = H->get_ancestor(neighId);
+        int leafAncestorIdx = hier->getAncestorId(leaf), neighAncestorIdx = hier->getAncestorId(neighId);
         if (leafAncestorIdx != neighAncestorIdx) {
 
             // Set the current Polygon to its parent if this triangle has already been merged with something else
             int longestEdgeObsIdx = p.edgeRefs(longestEdgeIdx);
-            if (leafAncestorIdx != leaf) p = H->get_vertex(leafAncestorIdx);
+            if (leafAncestorIdx != leaf) p = hier->getPolygon(leafAncestorIdx);
 
             // Merge the neighboring polygon with whatever the current Polygon is
             // (drop the shared edge between the Polygons and combine their vertex and edge references)
-            Polygon n = H->get_vertex(neighAncestorIdx), merged = mergePolygons_(p, n, longestEdgeObsIdx);
+            Polygon n = hier->getPolygon(neighAncestorIdx), merged = mergePolygons_(p, n, longestEdgeObsIdx);
 
             // If "mergePolygons" was successful, merge the Tree nodes in the geometric hierarchy
-            if (merged.n != -1) H->merge_op(leafAncestorIdx, neighAncestorIdx, merged);
+            if (merged.n != -1) hier->mergeOp(leafAncestorIdx, neighAncestorIdx, merged);
         }
     }
 }

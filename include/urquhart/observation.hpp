@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tree.hpp>
+#include <hierarchy.hpp>
 
 #include "libqhullcpp/RboxPoints.h"
 #include "libqhullcpp/QhullError.h"
@@ -19,6 +20,7 @@ namespace urquhart {
         public:
             explicit Observation(Points& freshLandmarks);
             explicit Observation(std::vector<std::vector<double>>& freshLandmarks);
+            ~Observation();
             void view();
 
             void computeHierarchy();
@@ -41,8 +43,10 @@ namespace urquhart {
             // The childs of a polygon are the triangles that were merged to compose it.
             // Triangles are the leaves of the tree.
             // The vertex 0 (root) is an empty polygon that is only used to connect all polygons
-            // TODO: H should be private and have accessors
-            Tree* H;
+            // TODO: hier should be private and have accessors
+            Hierarchy* hier = NULL;
+            // std::shared_ptr<Hierarchy> hier;
+
         private:
             // Computes a Delaunay triangulation using QHull from a set of landmarks.
             void delaunayTriangulationFromScratch(std::vector<Polygon>& polygons);

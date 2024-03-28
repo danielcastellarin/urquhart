@@ -4,21 +4,21 @@ namespace matching
 {
 
 void polygonMatching(
-    const urquhart::Observation &ref, std::vector<size_t> refIds,
-    const urquhart::Observation &targ, std::vector<size_t> targIds,
-    double thresh, std::vector<std::pair<size_t, size_t>> &polygonMatches)
+        const urquhart::Observation &ref, std::unordered_set<int> refIds,
+        const urquhart::Observation &targ, std::unordered_set<int> targIds, double thresh,
+        std::vector<std::pair<size_t, size_t>> &polygonMatches)
 {
     std::set<size_t> matched;
 
     // For each reference Polygon, try to find its best matching polygon in the target set
     for (const auto& rIdx : refIds) {
         size_t bestMatch = 0, bestDist = 100000;
-        urquhart::Polygon rp = ref.H->get_vertex(rIdx);
+        urquhart::Polygon rp = ref.hier->getPolygon(rIdx);
 
         for (const auto& tIdx : targIds) {
             // Only attempt a match if the target polygon has not been matched with another reference polygon already
             if (matched.find(tIdx) == matched.end()) {
-                urquhart::Polygon tp = targ.H->get_vertex(tIdx);
+                urquhart::Polygon tp = targ.hier->getPolygon(tIdx);
 
                 // Only attempt a match if the number of vertices each polygon has is within 3 of each other
                 if (std::abs(rp.n - tp.n) <= 3) {
@@ -52,7 +52,7 @@ std::vector<std::pair<PtLoc, PtLoc>> pointMatching(const urquhart::Observation &
 
     // At this point, we assume that all given triangle matches are probably correct, so we want to match up their vertices
     for (const auto& [refIdx, targIdx] : triangleMatches) {
-        urquhart::Polygon refTriangle = ref.H->get_vertex(refIdx), targTriangle = targ.H->get_vertex(targIdx);
+        urquhart::Polygon refTriangle = ref.hier->getPolygon(refIdx), targTriangle = targ.hier->getPolygon(targIdx);
 
         double bestDist = 1000000;
         Eigen::Vector3i bestPermutation;
@@ -89,12 +89,12 @@ std::vector<std::pair<PtLoc, PtLoc>> hierarchyMatching(const urquhart::Observati
     std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
 
     // Polygon Matching (Level 2)
-    polygonMatching(ref, ref.H->get_children(0), targ, targ.H->get_children(0), thresh, polygonMatches);
+    polygonMatching(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), thresh, polygonMatches);
 
     // Triangle Matching (Level 1)
     for (const auto& [refPoly, targPoly] : polygonMatches) {
         // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-        polygonMatching(ref, ref.H->get_children(refPoly), targ, targ.H->get_children(targPoly), thresh, triangleMatches);
+        polygonMatching(ref, ref.hier->getChildrenIds(refPoly), targ, targ.hier->getChildrenIds(targPoly), thresh, triangleMatches);
     }
 
     // Vertex Matching (Level 0)
@@ -120,7 +120,8 @@ std::vector<std::pair<Eigen::Index, Eigen::Index>> pointIndexMatching(const urqu
 
     // At this point, we assume that all given triangle matches are probably correct, so we want to match up their vertices
     for (const auto& [refIdx, targIdx] : triangleMatches) {
-        urquhart::Polygon refTriangle = ref.H->get_vertex(refIdx), targTriangle = targ.H->get_vertex(targIdx);
+        urquhart::Polygon refTriangle = ref.hier->getPolygon(refIdx), targTriangle = targ.hier->getPolygon(targIdx);
+
 
         double bestDist = 1000000;
         Eigen::Vector3i bestPermutation;
@@ -159,12 +160,12 @@ std::vector<std::pair<Eigen::Index, Eigen::Index>> hierarchyIndexMatching(const 
     std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
 
     // Polygon Matching (Level 2)
-    polygonMatching(ref, ref.H->get_children(0), targ, targ.H->get_children(0), thresh, polygonMatches);
+    polygonMatching(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), thresh, polygonMatches);
 
     // Triangle Matching (Level 1)
     for (const auto& [refPoly, targPoly] : polygonMatches) {
         // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-        polygonMatching(ref, ref.H->get_children(refPoly), targ, targ.H->get_children(targPoly), thresh, triangleMatches);
+        polygonMatching(ref, ref.hier->getChildrenIds(refPoly), targ, targ.hier->getChildrenIds(targPoly), thresh, triangleMatches);
     }
 
     // Vertex Matching (Level 0)
