@@ -85,10 +85,12 @@ void Hierarchy::mergeHelper(int existingNodeId, std::unordered_set<int>& newPoly
 // Accessors
 // =========
 
-Polygon Hierarchy::getPolygon(const int v) { return polygonLookup[v]; }
+Polygon Hierarchy::getPolygon(int v) { return polygonLookup[v]; }
 
-int Hierarchy::getAncestorId(const int v) { return parentLookup[v] == rootId ? v : parentLookup[v]; }
+int Hierarchy::getAncestorId(int v) { return parentLookup[v] == rootId ? v : parentLookup[v]; }
 
-std::unordered_set<int> Hierarchy::getChildrenIds(const int v) { return childrenLookup.find(v) == childrenLookup.end() ? std::unordered_set<int>{v} : childrenLookup[v]; }
+std::unordered_set<int> Hierarchy::getChildrenIds(int v) { return (childrenLookup.find(v) == childrenLookup.end() ? std::unordered_set<int>{v} : childrenLookup.at(v)); }
+
+int Hierarchy::getNumH2Polygons() { return childrenLookup.at(rootId).size(); }
 
 }

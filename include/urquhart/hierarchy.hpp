@@ -39,12 +39,14 @@ namespace urquhart {
             int mergeOp(int i, int j, const Polygon& data);
             void mergeHelper(int existingNodeId, std::unordered_set<int>& newPolygonChildren);
 
-            Polygon getPolygon(const int v);
+            Polygon getPolygon(int v);
             // Gets the parent of a Polygon in the geometric hierarchy
-            int getAncestorId(const int v);
-            std::unordered_set<int> getChildrenIds(const int v);
+            int getAncestorId(int v);
+            std::unordered_set<int> getChildrenIds(int v);
             // need alternative in matching for when called on triangle to only return itself
             // maybe if no children, return itself in a vector?
+
+            int getNumH2Polygons();
 
             int rootId = 0, polyIdSequence = 0;
         

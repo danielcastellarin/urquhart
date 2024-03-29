@@ -3,6 +3,28 @@
 namespace matching
 {
 
+std::vector<std::pair<Eigen::Index, Eigen::Index>> hierarchyIndexMatching(const urquhart::Observation &ref,
+                                                        const urquhart::Observation &targ, double thresh)
+{
+    std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;    
+
+    // Polygon Matching (Level 2)
+    polygonMatching(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), thresh, polygonMatches);
+
+    // Triangle Matching (Level 1)
+    for (const auto& [refPoly, targPoly] : polygonMatches) {
+        // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
+        polygonMatching(ref, ref.hier->getChildrenIds(refPoly), targ, targ.hier->getChildrenIds(targPoly), thresh, triangleMatches);
+    }
+
+    // std::vector<std::pair<Eigen::Index, Eigen::Index>> pairs = pointIndexMatching(ref, targ, triangleMatches);
+    // std::cout << pairs.size() << " pairs acquired" << std::endl;
+    // return pairs;
+
+    // Vertex Matching (Level 0)
+    return pointIndexMatching(ref, targ, triangleMatches);
+}
+
 void polygonMatching(
         const urquhart::Observation &ref, std::unordered_set<int> refIds,
         const urquhart::Observation &targ, std::unordered_set<int> targIds, double thresh,
@@ -36,25 +58,6 @@ void polygonMatching(
             polygonMatches.push_back({rIdx, bestMatch});
         }
     }
-}
-
-
-std::vector<std::pair<Eigen::Index, Eigen::Index>> hierarchyIndexMatching(const urquhart::Observation &ref,
-                                                        const urquhart::Observation &targ, double thresh)
-{
-    std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
-
-    // Polygon Matching (Level 2)
-    polygonMatching(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), thresh, polygonMatches);
-
-    // Triangle Matching (Level 1)
-    for (const auto& [refPoly, targPoly] : polygonMatches) {
-        // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-        polygonMatching(ref, ref.hier->getChildrenIds(refPoly), targ, targ.hier->getChildrenIds(targPoly), thresh, triangleMatches);
-    }
-
-    // Vertex Matching (Level 0)
-    return pointIndexMatching(ref, targ, triangleMatches);
 }
 
 

@@ -17,7 +17,8 @@ Observation::Observation(std::vector<std::vector<double>>& freshLandmarks) {
     computeHierarchy();
 };
 
-Observation::~Observation() { delete hier; }
+// Observation::~Observation() { delete hier; }
+Observation::~Observation() {}
 
 void Observation::view() { hier->viewPolygons(std::cout); }
 
@@ -235,7 +236,9 @@ void Observation::delaunayTriangulationFromScratch(std::vector<Polygon>& polygon
 
 
 const PtLoc& Observation::ldmk(Eigen::Index colNum) const { return landmarks.col(colNum); }
+// const PtLoc& Observation::ldmk(Eigen::Index colNum) const { return Eigen::Ref<PtLoc>(landmarks.col(colNum)); }
 const double& Observation::ldmkX(Eigen::Index colNum) const { return landmarks(0, colNum); }
 const double& Observation::ldmkY(Eigen::Index colNum) const { return landmarks(1, colNum); }
 const Points& Observation::ldmks(Eigen::VectorXi indices) const { return landmarks(Eigen::placeholders::all, indices); }
+// const Points& Observation::ldmks(Eigen::VectorXi indices) const { return Eigen::Ref<Points>(landmarks(Eigen::placeholders::all, indices)); }
 } // urquhart
