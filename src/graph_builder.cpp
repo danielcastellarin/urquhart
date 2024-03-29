@@ -1,4 +1,5 @@
 #include <matching.hpp>
+#include <logging.hpp>
 #include <memory>
 #include <random>
 #include <unordered_map>
@@ -18,34 +19,13 @@
 #include <ros/package.h>
 
 
-void writeHierarchyToFiles(const urquhart::Observation& trees, std::string filePath, std::string fileName) {
+void writeHierarchyFiles(const urquhart::Observation& trees, std::string filePath, std::string fileName) {
     std::ofstream plyOut(filePath+"/p/"+fileName), triOut(filePath+"/t/"+fileName), 
                     hieOut(filePath+"/h/"+fileName), dscOut(filePath+"/d/"+fileName);
-    trees.hier->viewTree(hieOut);
-    hieOut.close();
     
-    // Iterate over the indices of the Polygons in the hierarchy
-    for(auto pIdx : trees.hier->getChildrenIds(0)) {
-        for (int i = 0; i < trees.hier->getPolygon(pIdx).landmarkRefs.size(); ++i) {
-            auto myPoint =  trees.landmarks.col(trees.hier->getPolygon(pIdx).landmarkRefs(i));
-            plyOut << pIdx << " " << myPoint[0] << " " << myPoint[1] << "|";
-        }
-        plyOut << std::endl;
-        for(auto d : trees.hier->getPolygon(pIdx).descriptor) dscOut << d << " ";
-        dscOut << std::endl;
-        
-        // Iterate over the indices of the Triangles that compose this Polygon
-        for(auto tIdx : trees.hier->getChildrenIds(pIdx)) {
-            // Retain only the Polygon objects that have three sides
-            if (trees.hier->getPolygon(tIdx).n == 3) {
-                for (int i = 0; i < trees.hier->getPolygon(tIdx).landmarkRefs.size(); ++i) {
-                    auto myPoint = trees.landmarks.col(trees.hier->getPolygon(tIdx).landmarkRefs(i));
-                    triOut << tIdx << " " << myPoint[0] << " " << myPoint[1] << "|";
-                }
-                triOut << std::endl;
-            }
-        }
-    }
+    logging::writeHierarchyToFile(trees, plyOut, triOut, hieOut, dscOut);
+    
+    hieOut.close();
     plyOut.close();
     triOut.close();
     dscOut.close();
@@ -153,9 +133,6 @@ struct PPEdge { // Point location derived from matching local shapes with global
                 0,  100,   0,
                 0,    0, 100;
     }
-    // bool operator==(const LandmarkNode &other) const{ return id == other.id; }
-    // void transform(double xDiff, double yDiff) {p.translate(xDiff, yDiff);}
-    // std::string toString() const { return std::to_string(id) + ":(" + p.toString() + ")";}
 };
 
 struct PLEdge {
@@ -167,11 +144,9 @@ struct PLEdge {
         info << 100,  0,
                 0,  100;
     }
-    // bool operator==(const LandmarkNode &other) const{ return id == other.id; }
-    // std::string toString() const { return std::to_string(id) + ":(" + p.toString() + ")";}
 };
 
-
+// USED ONLY FOR GRAPHSLAM MATH
 Eigen::Matrix3d v2t(Eigen::Vector3d vec) {
     double c = cos(vec(2)), s = sin(vec(2));
     Eigen::Matrix3d tf;
@@ -575,7 +550,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     // Print the graph to a file (for debugging)
     if (isDebug) {
         std::cout << "Logging global data... ";
-        writeHierarchyToFiles(*g.geoHier, outputPath, g.poseNodeList.size()+".txt");
+        writeHierarchyFiles(*g.geoHier, outputPath, g.poseNodeList.size()+".txt");
         std::cout << "   Done!" << std::endl;
         std::cout << "Saving graph data... ";
         g.writeGraphToFiles(outputPath, g.poseNodeList.size()+".txt");
