@@ -1,5 +1,8 @@
 #include <string>
 #include <cmath>
+#include <vector>
+#include <fstream>
+#include <sstream>
 
 constexpr double PI = 3.14159265358;
 constexpr double HALFPI = PI/2;
@@ -76,3 +79,23 @@ struct NoStraightPathCollisions {
         // NoCollision? {  TRUE |              FALSE              | TRUE
     }
 };
+
+
+std::vector<Tree> readForestFile(std::string path) {
+    // Assume each line in the file describes a point in 2D (space-separated)
+    std::vector<Tree> forest;
+    std::ifstream infile(path);
+    double xPosition,yPosition,radius;
+
+    std::string line;
+    while (std::getline(infile, line))
+    {
+        std::istringstream iss(line);
+        if (iss >> xPosition >> yPosition >> radius) { // only collect the tree data
+            forest.push_back(Tree(xPosition, yPosition, radius));
+        }
+    }
+
+    infile.close();
+    return forest;
+}

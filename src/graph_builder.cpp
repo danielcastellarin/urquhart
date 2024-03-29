@@ -1,5 +1,4 @@
 #include <matching.hpp>
-#include <graph_geometry.hpp>
 #include <memory>
 #include <random>
 #include <unordered_map>
@@ -14,6 +13,7 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <sensor_msgs/PointCloud2.h>
+
 #include <ros/ros.h>
 #include <ros/package.h>
 

@@ -1,6 +1,6 @@
-#include <obs_range_help.hpp>
-#include <observation.hpp>
+// #include <obs_range_help.hpp>
 #include <matching.hpp>
+#include <logging.hpp>
 #include <memory>
 #include <random>
 #include <unordered_map>
@@ -10,43 +10,134 @@
 #include <algorithm>
 #include <iostream>
 #include <filesystem>
+#include <fstream>
+
+#include <ros/ros.h>
+#include <ros/package.h>
+
+struct SimConfig
+{
+    std::string absolutePackagePath, outputDirPath, polygonsPath, polyPolyPath, polyTriPath, polyHierPath, polyDescPath, 
+        localPointsPath, 
+        matchesPath, matchPolyPath, matchTriPath, matchPointsPath;
+    // Required Parameters
+    std::vector<Tree> forest;
+    std::string forestFile;
+    std::vector<int> obsRanges;
+    double collisionRadius, 
+    // Optional Parameters
+    successfulObservationProbability, treePositionStandardDeviation, treeRadiusStandardDeviation;
+    int initializationAttempts, randomSeed;
+    bool givenStartPose = false;
+    Pose initialPose;
+    std::string outputDirName;
+
+    // Each config file is designed to be a static run config
+    SimConfig(const ros::NodeHandle &nh) {
+
+        absolutePackagePath = ros::package::getPath("urquhart") + "/";
+
+        // Required parameters
+        nh.param<std::string>("forestFile", forestFile, "coolForest.txt");
+        forest = readForestFile(absolutePackagePath + forestFile);
+        obsRanges = nh.param("observationRanges", std::vector<int>{10,20,40,80});   // Note "Radius" and "Range"! (naming changes from paramter to code)
+        collisionRadius = nh.param("collisionRadius", 0.3);
+
+        // Optional parameters
+        successfulObservationProbability = nh.param("successfulObservationProbability", 1);
+        treePositionStandardDeviation = nh.param("treePositionStandardDeviation", 0);
+        treeRadiusStandardDeviation = nh.param("treeRadiusStandardDeviation", 0);
+        if (nh.hasParam("startPoseX") && nh.hasParam("startPoseY") && nh.hasParam("startPoseTheta")) {
+            double x, y, theta;
+            nh.getParam("startPoseX", x), nh.getParam("startPoseY", y), nh.getParam("startPoseTheta", theta);
+            initialPose = Pose(x, y, theta);
+            givenStartPose = true;
+        }
+        initializationAttempts = nh.param("initializationAttempts", 10000);
+        randomSeed = nh.param("randomSeed", -1);
+        nh.param<std::string>("outputDirName", outputDirName, "testOutput");
+
+        outputDirPath = absolutePackagePath+"output/"+outputDirName;
+        localPointsPath = outputDirPath+"/local_obs/";
+
+        polygonsPath = outputDirPath+"/poly/";
+        polyPolyPath = polygonsPath+"p/";
+        polyTriPath = polygonsPath+"t/";
+        polyHierPath = polygonsPath+"h/";
+        polyDescPath = polygonsPath+"d/";
+
+        matchesPath = outputDirPath+"/match/";
+        matchPolyPath = matchesPath+"polygonIDs/";
+        matchTriPath = matchesPath+"triangleIDs/";
+        matchPointsPath = matchesPath+"points/";
+    }
+    void outputConfig(std::ostream& out) { 
+        out << "Forest file used: " << forestFile << std::endl;
+        out << "Observation ranges: "; for (auto i: obsRanges) out << i << " ";
+        out << std::endl << "Collision width: " << collisionRadius << std::endl;
+        out << "Detection noise: " << successfulObservationProbability << std::endl;
+        out << "Position noise: " << treePositionStandardDeviation << std::endl;
+        out << "Tree radius noise: " << treeRadiusStandardDeviation << std::endl;
+        out << "Maximum initialization attempts: " << initializationAttempts << std::endl;
+        out << "Random seed: " << (randomSeed >= 0 ? std::to_string(randomSeed) : "None") << std::endl;
+        out << "Starting pose input: " << (givenStartPose ? initialPose.printPose() : "None") << std::endl;
+    }
+};
+
+struct Obs {
+    int obsRange;
+    Pose globalPose;
+    std::vector<Tree> treePositions;
+    Obs(int r, Pose pose) : obsRange(r), globalPose(pose) {}
+};
+
+
+class Robot {
+    bool givenInitialPose;
+    int initAttempts;
+    std::vector<int> myObsRanges, myObsRangesSq;
+
+    double successfulObservationProbability;
+    double treePositionStandardDeviation;
+    double treeRadiusStandardDeviation;
+
+    std::random_device randomDevice;
+    std::mt19937 rng;
+    std::uniform_real_distribution<double> randX;
+    std::uniform_real_distribution<double> randY;
+    std::uniform_real_distribution<double> randTheta;
+    std::uniform_real_distribution<double> detectionNoise;
+    std::normal_distribution<double> positionNoise, treeRadiusNoise;
+
+    // Assume an observation occurs every second
+    // linear+angular velocity (magnitude and direction) will depend on path type
+    // distBetweenObs can be repurposed for rotating at corners of routes
+
+    public:
+        std::vector<Tree> env;
+        float collisionWidth;
+        Pose globalPose;
+        int currentObsIdx = 0;
+
+        Robot(SimConfig cfg);
+        Point findValidPoint();
+        bool validateStartingPose();
+        Obs observe();
+
+        // default detection noise simply is a percentage chance asking "is tree detected?"
+        // Potential improvement: detection noise can be proportional to gaussian (tree less likely to be seen further away from obs)
+};
+
 
 // IO stuff
 
-void writeObservationToFile(std::string filePath, const std::vector<Tree>& trees) {
-    std::ofstream out(filePath+".txt");
-    for (const Tree& t : trees) out << t.toString() << std::endl;
-    out.close();
-}
-
-void writeHierarchyToFile(SimConfig cfg, const urquhart::Observation& trees, std::string fileName) {
+void writeHierarchyFiles(SimConfig cfg, const urquhart::Observation& trees, std::string fileName) {
     std::ofstream plyOut(cfg.polyPolyPath+fileName), triOut(cfg.polyTriPath+fileName), 
                     hieOut(cfg.polyHierPath+fileName), dscOut(cfg.polyDescPath+fileName);
-    trees.hier->viewTree(hieOut);
-    hieOut.close();
     
-    // Iterate over the indices of the Polygons in the hierarchy
-    for(auto pIdx : trees.hier->getChildrenIds(0)) {
-        for (int i = 0; i < trees.hier->getPolygon(pIdx).landmarkRefs.size(); ++i) {
-            auto myPoint =  trees.landmarks.col(trees.hier->getPolygon(pIdx).landmarkRefs(i));
-            plyOut << pIdx << " " << myPoint[0] << " " << myPoint[1] << "|";
-        }
-        plyOut << std::endl;
-        for(auto d : trees.hier->getPolygon(pIdx).descriptor) dscOut << d << " ";
-        dscOut << std::endl;
-        
-        // Iterate over the indices of the Triangles that compose this Polygon
-        for(auto tIdx : trees.hier->getChildrenIds(pIdx)) {
-            // Retain only the Polygon objects that have three sides
-            if (trees.hier->getPolygon(tIdx).n == 3) {
-                for (int i = 0; i < trees.hier->getPolygon(tIdx).landmarkRefs.size(); ++i) {
-                    auto myPoint = trees.landmarks.col(trees.hier->getPolygon(tIdx).landmarkRefs(i));
-                    triOut << tIdx << " " << myPoint[0] << " " << myPoint[1] << "|";
-                }
-                triOut << std::endl;
-            }
-        }
-    }
+    logging::writeHierarchyToFile(trees, plyOut, triOut, hieOut, dscOut);
+    
+    hieOut.close();
     plyOut.close();
     triOut.close();
     dscOut.close();
@@ -204,9 +295,9 @@ int main(int argc, char* argv[]) {
                 myObs = new urquhart::Observation(treeXYs);
 
                 // Save hierarchy data to files
-                writeObservationToFile(cfg.localPointsPath+std::to_string(nextObs.obsRange), nextObs.treePositions);
+                logging::writeObservationToFile(cfg.localPointsPath+std::to_string(nextObs.obsRange), nextObs.treePositions);
                 std::cout << r.currentObsIdx << ": Written observation to file" << std::endl;
-                // writeHierarchyToFile(cfg, *myObs, std::to_string(nextObs.obsRange)+".txt");
+                // writeHierarchyFiles(cfg, *myObs, std::to_string(nextObs.obsRange)+".txt");
                 std::cout << r.currentObsIdx << ": Written geometric hierarchy to file" << std::endl;
 
                 // Try matching previous observations with this one, save the output in files 
