@@ -56,13 +56,13 @@ namespace urquhart {
             void delaunayTriangulationFromScratch(std::vector<Polygon>& polygons);
             
             // Uses the triangles of the delaunay triangulation to build an "urquhart tessellation"
-            void urquhartTesselation_();
+            void urquhartTesselation();
             
             // Create a new polygon from existing polyons
-            Polygon mergePolygons_(Polygon& p, Polygon& n, int edgeIndexInP);
+            Polygon mergePolygons(Polygon& p, Polygon& n, int edgeIndexInP);
             
             void printPolygon(const Polygon& p);
 
-            Points* getPolygonPoints(const Polygon& p);
+            bool isNextEdgeBigger(int prevIdx, int nextIdx);
     };
 }

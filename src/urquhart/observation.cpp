@@ -8,7 +8,7 @@ Observation::Observation(Points& freshLandmarks) {
 };
 
 Observation::Observation(std::vector<std::vector<double>>& freshLandmarks) {
-    // Legacy method for processing vector input
+    // Legacy method for processing input from std::vector
     landmarks.resize(2, freshLandmarks.size());
     for (int i = 0; i < freshLandmarks.size(); ++i) {
         landmarks.col(i) = Eigen::Vector2d{freshLandmarks[i][0], freshLandmarks[i][1]};
@@ -17,6 +17,7 @@ Observation::Observation(std::vector<std::vector<double>>& freshLandmarks) {
     computeHierarchy();
 };
 
+// CAREFUL!! destructor can purge the hierarchy before we actually want it gone
 // Observation::~Observation() { delete hier; }
 Observation::~Observation() {}
 
@@ -38,7 +39,7 @@ void Observation::computeHierarchy() {
     hier = new Hierarchy(triangles); // TODO use shared pointer here?
 
     // Merge triangles into new polygons by removing their longest edges
-    urquhartTesselation_();
+    urquhartTesselation();
 }
 
 void Observation::recomputeEdgeLengths() {
@@ -48,37 +49,26 @@ void Observation::recomputeEdgeLengths() {
 }
 
 
-void Observation::urquhartTesselation_() {
+void Observation::urquhartTesselation() {
+    // Process every triangle to construct an Urquhart tessellation
     for (const auto& leaf : hier->getChildrenIds(0)) {
-
-        // Identify the longest edge of this triangle
         Polygon p = hier->getPolygon(leaf);
-        int neighId = -1, longestEdgeIdx = -1;
-        double longestEdgeLen = -1;
-        for (int i=0; i < p.n; ++i) {
-            double thisEdgeLen = triangulationEdgeLengths(p.edgeRefs(i));
-            if (thisEdgeLen > longestEdgeLen) {
-                longestEdgeLen = thisEdgeLen;
-                neighId = p.neighbors(i);
-                longestEdgeIdx = i;
-            }
-        }
         
-        // When the longest edge is at the outer boundary of the triangulation,
+        // When the longest edge is at the outer boundary of the triangulation (aka doesn't neighbor another triangle), 
         // don't merge the triangle with anything --> it will still be a direct child of the Tree's root node
-        if (neighId == -1) continue;
+        if (p.neighbors(p.longestEdgeIdx) == -1) continue;
 
         // If these two triangles have not already been merged with each other, continue
-        int leafAncestorIdx = hier->getAncestorId(leaf), neighAncestorIdx = hier->getAncestorId(neighId);
+        int leafAncestorIdx = hier->getAncestorId(leaf), neighAncestorIdx = hier->getAncestorId(p.neighbors(p.longestEdgeIdx));
         if (leafAncestorIdx != neighAncestorIdx) {
 
             // Set the current Polygon to its parent if this triangle has already been merged with something else
-            int longestEdgeObsIdx = p.edgeRefs(longestEdgeIdx);
+            int triangulationEdgeIdx = p.edgeRefs(p.longestEdgeIdx);
             if (leafAncestorIdx != leaf) p = hier->getPolygon(leafAncestorIdx);
 
             // Merge the neighboring polygon with whatever the current Polygon is
             // (drop the shared edge between the Polygons and combine their vertex and edge references)
-            Polygon n = hier->getPolygon(neighAncestorIdx), merged = mergePolygons_(p, n, longestEdgeObsIdx);
+            Polygon n = hier->getPolygon(neighAncestorIdx), merged = mergePolygons(p, n, triangulationEdgeIdx);
 
             // If "mergePolygons" was successful, merge the Tree nodes in the geometric hierarchy
             if (merged.n != -1) hier->mergeOp(leafAncestorIdx, neighAncestorIdx, merged);
@@ -87,7 +77,7 @@ void Observation::urquhartTesselation_() {
 }
 
 
-Polygon Observation::mergePolygons_(Polygon& p, Polygon& n, int edgeIndexInObs) {
+Polygon Observation::mergePolygons(Polygon& p, Polygon& n, int edgeIndexInObs) {
     // ORIGINAL DOCSTRING
     // (0,1), (1,2), (2,0)
     //                     => (0,1), (1,2), (2,4), (4,0)
@@ -114,8 +104,8 @@ Polygon Observation::mergePolygons_(Polygon& p, Polygon& n, int edgeIndexInObs) 
     //    - The vertices of the shared polygons should be the first and last element in the list of landmark references 
     //    - In p, the shared edge should be the LAST  element in its list
     //    - In n, the shared edge should be the FIRST or LAST element in its list
-    p.coolRotate(1+edgeIndexInP % p.n);
-    n.coolRotate(edgeIndexInN);
+    p.rotateElements(1+edgeIndexInP % p.n);
+    n.rotateElements(edgeIndexInN);
 
 
     // Combine the Polygon data
@@ -136,6 +126,9 @@ Polygon Observation::mergePolygons_(Polygon& p, Polygon& n, int edgeIndexInObs) 
         combinedNeighbors << p.neighbors.head(p.n-1), n.neighbors.head(n.n-1);
     }
 
+    // TODO if we want to preserve the longest edge for Polygons, need to do comparison of the two longest edges here and pass through the bigger one
+    // Reminder: since we are dropping a triangle's longest edge, we'd need to find the next largest one
+    //           hence we would probably need to rank the edges length to make that step easier here
     return Polygon(combinedLdmkRef, combinedEdgeRef, combinedNeighbors, p.isClockwise, landmarks, triangulationEdgeLengths);
 }
 
@@ -204,6 +197,7 @@ void Observation::delaunayTriangulationFromScratch(std::vector<Polygon>& polygon
 
         // Process the edges of this triangle
         double vertexOrdering = 0;
+        int longestEdgeIdx = -1;
         Eigen::Vector3i edgeIDs;
         for (int srcID = 0, dstID = 1; srcID < 3; dstID = (++srcID+1)%3) {
             // Compute this edge's bidirectional UID 
@@ -223,6 +217,9 @@ void Observation::delaunayTriangulationFromScratch(std::vector<Polygon>& polygon
             }
             edgeIDs(srcID) = edgeRefMap[edgeID];
 
+            // Track the triangle's longest edge
+            if (longestEdgeIdx == -1 || isNextEdgeBigger(edgeIDs(longestEdgeIdx), edgeIDs(srcID))) longestEdgeIdx = srcID;
+
             // Accumulate the signed area of this triangle while processing edges
             // A negative value indicates the vertices/edges are ordered clockwise
             vertexOrdering += landmarks(Eigen::placeholders::all, {ldmkIds[srcID], ldmkIds[dstID]}).determinant();
@@ -230,10 +227,12 @@ void Observation::delaunayTriangulationFromScratch(std::vector<Polygon>& polygon
             // SIDE EFFECT: use this loop to shift neighbor order to align with edges (edge[i] will be shared with neighIds[i])
             neighIds(dstID) = auxNeighIds[srcID];
         }
-        polygons.push_back(Polygon(ldmkIds, edgeIDs, neighIds, vertexOrdering < 0, landmarks, triangulationEdgeLengths));
+        polygons.push_back(Polygon(ldmkIds, edgeIDs, neighIds, vertexOrdering < 0, landmarks, triangulationEdgeLengths, longestEdgeIdx));
     }
 };
 
+
+bool Observation::isNextEdgeBigger(int prevIdx, int nextIdx) { return triangulationEdgeLengths(nextIdx) > triangulationEdgeLengths(prevIdx); }
 
 const PtLoc& Observation::ldmk(Eigen::Index colNum) const { return landmarks.col(colNum); }
 // const PtLoc& Observation::ldmk(Eigen::Index colNum) const { return Eigen::Ref<PtLoc>(landmarks.col(colNum)); }

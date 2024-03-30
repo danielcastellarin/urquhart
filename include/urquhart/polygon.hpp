@@ -5,18 +5,19 @@
 namespace urquhart {
     class Polygon {
         public:
+            // Empty constructor for root of hierarchy and failed merge attempts
             explicit Polygon() {
                 landmarkRefs = {};
                 neighbors = {};
                 edgeRefs = {};
                 descriptor = {};
-                n = -1;
+                n = -1, longestEdgeIdx = -1;
             }
 
-            // TODO test whether the polygon vectors can be passed in by reference
-            explicit Polygon(Eigen::VectorXi pRefs, // Copy these values into new space?
-                                Eigen::VectorXi eRefs,  // If not, vectors should have dynamic size when initialized outside
-                                Eigen::VectorXi nn,
+            // Constructor for non-triangles 
+            explicit Polygon(const Eigen::VectorXi& pRefs,
+                                const Eigen::VectorXi& eRefs,
+                                const Eigen::VectorXi& nn,
                                 bool isClock, 
                                 const Points& ldmks, 
                                 const Eigen::VectorXd& eLens) {
@@ -24,19 +25,39 @@ namespace urquhart {
                 edgeRefs = eRefs;
                 neighbors = nn;
                 isClockwise = isClock;
-                // std::cout << "Defs done" << std::endl;
                 n = pRefs.size();
+                longestEdgeIdx = -1;
                 descriptor = poly_desc::compute(pRefs, eRefs, ldmks, eLens);
             }
 
-            void reverse() { // Performed on this polygon when it disagrees with the direction of a polygon initiating a merge 
+            // Constructor for triangles, includes index of eRefs for its longest edge length
+            explicit Polygon(const Eigen::VectorXi& pRefs,
+                                const Eigen::VectorXi& eRefs,
+                                const Eigen::VectorXi& nn,
+                                bool isClock, 
+                                const Points& ldmks, 
+                                const Eigen::VectorXd& eLens,
+                                int longestEdgeIndex) {
+                landmarkRefs = pRefs;
+                edgeRefs = eRefs;
+                neighbors = nn;
+                isClockwise = isClock;
+                n = pRefs.size();
+                longestEdgeIdx = longestEdgeIndex;
+                descriptor = poly_desc::compute(pRefs, eRefs, ldmks, eLens);
+            }
+
+            // Reverse the elements of this polygon.
+            // Executed when disagreeing with the direction of another polygon that is initiating a merge
+            void reverse() {  
                 landmarkRefs.reverseInPlace();
                 edgeRefs.reverseInPlace();
                 neighbors.reverseInPlace();
                 isClockwise = !isClockwise;
             }
 
-            int findEdgeIndex(const int& commonEdge) { // Retrieve the index of an edge, -1 if not present
+            // Retrieve the local index of an edge in the triangulation, -1 if not present
+            int findEdgeIndex(const int& commonEdge) {
                 for (int i = 0; i < n; ++i) {
                     if (edgeRefs(i) == commonEdge) return i;
                 }
@@ -44,7 +65,7 @@ namespace urquhart {
             }
 
             // Puts the elements in position "idx" at the beginning of each vector. Used during merging operations.
-            void coolRotate(const int& idx) {
+            void rotateElements(const int& idx) {
                 Eigen::PermutationMatrix<-1, -1> perm(n);
                 Eigen::VectorXi permIndices(n);
 
@@ -71,7 +92,7 @@ namespace urquhart {
             // Whether vertex/edge order is clockwise (calculated during triangulation)
             bool isClockwise;
             
-            // number of sides
-            int n;
+            int n;              // number of sides
+            int longestEdgeIdx; // index of edgeRefs for longest edge (triangles only)
     };
 }
