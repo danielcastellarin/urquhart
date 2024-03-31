@@ -26,11 +26,6 @@ void Observation::view() { hier->viewPolygons(std::cout); }
 
 void Observation::computeHierarchy() {
 
-    // Initialize empty structures for edge data
-    triangulationEdges.resize(2, 1);
-    triangulationEdgeLengths.resize(1);
-    edgeRefMap.clear();
-
     // Initialize hierarchy with Delaunay triangulation
     std::vector<Polygon> triangles;
     delaunayTriangulationFromScratch(triangles);
@@ -58,7 +53,7 @@ void Observation::urquhartTesselation() {
         // don't merge the triangle with anything --> it will still be a direct child of the Tree's root node
         if (p.neighbors(p.longestEdgeIdx) == -1) continue;
 
-        // If these two triangles have not already been merged with each other, continue
+        // Continue processing if these two triangles have not already been merged with each other
         int leafAncestorIdx = hier->getAncestorId(leaf), neighAncestorIdx = hier->getAncestorId(p.neighbors(p.longestEdgeIdx));
         if (leafAncestorIdx != neighAncestorIdx) {
 
@@ -162,20 +157,25 @@ void Observation::delaunayTriangulationFromScratch(std::vector<Polygon>& polygon
     orgQhull::Qhull q;
     q.runQhull(qhull_points.comment().c_str(), qhull_points.dimension(),
                    qhull_points.count(), qhull_points.coordinates(), "Qt Qbb Qc Qz Q12 d");
-    // TODO the option "Fx" computes the convex hull, too; would be useful to preallocate space for the edges and edgeLengths
 
-
-    // the facet ids are confusing, we want to map the good facets to order of appearance
-    size_t fIdx = 0;
+    // Facet ids are confusing; we want to map the good facets in order of appearance
+    size_t fIdx = 0;                // <---- This value resolves to the number of triangles we made
     std::map<size_t, size_t> id_map;
     for (const auto& e : q.facetList()) {
         if (e.isGood()) id_map[e.id()] = ++fIdx;
     }
 
-    // Store edge lengths in a matrix, store references to these lengths in each Polygon
-    int edgeListSize = 0;
-    // TODO resize "triangulationEdges" with number of unique edges in triangulation:
-    // 3n - h - 3 <-- n=#vertices, h=#vertices in convex hull
+    // n = #vertices, h = #vertices in convex hull 
+    // edges in triangulation       = 3n - h - 3
+    // triangles in triangulation   = 2n - h - 2
+    // THEREFORE --> #edges = #triangles + n + 1
+    int numEdges = fIdx + landmarks.cols() + 1, edgeListIdx = 0, polygonIdx = 0;
+
+    // Reserve space to store polygon and edge data for geometric hierarchy
+    polygons.resize(fIdx);
+    triangulationEdges.resize(2, numEdges);
+    triangulationEdgeLengths.resize(numEdges);
+    edgeRefMap.clear(); edgeRefMap.reserve(numEdges);
 
     // Delaunay regions as a vector of vectors
     orgQhull::QhullFacetListIterator k(q.facetList());
@@ -203,17 +203,12 @@ void Observation::delaunayTriangulationFromScratch(std::vector<Polygon>& polygon
             // Compute this edge's bidirectional UID 
             size_t edgeID = cantorPairing(ldmkIds[srcID], ldmkIds[dstID]);
 
-            // Only process new edges
+            // Store edge data only if it hasn't been seen yet
             if (edgeRefMap.find(edgeID) == edgeRefMap.end()) {
-                edgeRefMap[edgeID] = edgeListSize++;
-                
-                triangulationEdges.conservativeResize(2, edgeListSize);      // TODO until I'm able to get number of edges in the triangulation,
-                triangulationEdgeLengths.conservativeResize(edgeListSize);   //      I will need to allocate space as I go
-                
-                // order of landmark references does not matter because "triangulationEdges" because we preserve vertex order in Polygons
-                triangulationEdges.col(edgeListSize-1) = Eigen::Vector2i{ldmkIds(srcID), ldmkIds(dstID)};
-                triangulationEdgeLengths(edgeListSize-1) = euclideanDistance2D(landmarks.col(ldmkIds(srcID)), landmarks.col(ldmkIds(dstID)));
-                // TODO reference "landmarks"
+                // REMINDER: order of edges <src,dst> DOES NOT MATTER because Polygons preserve it through order of landmarks
+                triangulationEdges.col(edgeListIdx) = Eigen::Vector2i{ldmkIds(srcID), ldmkIds(dstID)};
+                triangulationEdgeLengths(edgeListIdx) = euclideanDistance2D(landmarks.col(ldmkIds(srcID)), landmarks.col(ldmkIds(dstID)));
+                edgeRefMap[edgeID] = edgeListIdx++;
             }
             edgeIDs(srcID) = edgeRefMap[edgeID];
 
@@ -224,10 +219,12 @@ void Observation::delaunayTriangulationFromScratch(std::vector<Polygon>& polygon
             // A negative value indicates the vertices/edges are ordered clockwise
             vertexOrdering += landmarks(Eigen::placeholders::all, {ldmkIds[srcID], ldmkIds[dstID]}).determinant();
             
-            // SIDE EFFECT: use this loop to shift neighbor order to align with edges (edge[i] will be shared with neighIds[i])
+            // LOOP SIDE EFFECT: shift neighbor order to align with edges (edge[i] will be shared with neighIds[i])
             neighIds(dstID) = auxNeighIds[srcID];
         }
-        polygons.push_back(Polygon(ldmkIds, edgeIDs, neighIds, vertexOrdering < 0, landmarks, triangulationEdgeLengths, longestEdgeIdx));
+
+        // Store the processed triangle and calculate its descriptor
+        polygons[polygonIdx++] = Polygon(ldmkIds, edgeIDs, neighIds, vertexOrdering < 0, landmarks, triangulationEdgeLengths, longestEdgeIdx);
     }
 };
 
