@@ -20,7 +20,7 @@ def keypress(event):
         draw_vis()
 
 
-def get_obs(dirname, frameID):
+def get_global_obs(dirname, frameID):
     polygons = []
     for line in open(f'{dirname}/global/p/{frameID}.txt'):
         polygons.append(zip(*[tuple(map(float, c.split(' '))) for c in line.split('|')[:-1]]))
@@ -30,16 +30,23 @@ def get_obs(dirname, frameID):
         triangles.append(zip(*[tuple(map(float, c.split(' '))) for c in line.split('|')[:-1]]))
 
     trees = [tuple(map(float, [n for n in line.split(' ')[1:] if n != ""])) for line in open(f'{dirname}/global/graph_nodes/{frameID}.txt') if line.split(' ')[0][0] == 'L']
-    # trees = []
-    # for line in open(f'{dirname}/graph_nodes/{frameID}.txt'):
-    #     if line.split(' ')[0][0] == 'L':
-    #         print(line.split(' ')[1:])
-    #         trees.append(tuple(map(float, [n for n in line.split(' ')[1:] if n != ""])))
+    return polygons, triangles, trees
+
+def get_local_obs(dirname, frameID):
+    polygons = []
+    for line in open(f'{dirname}/local/p/{frameID}.txt'):
+        polygons.append(zip(*[tuple(map(float, c.split(' '))) for c in line.split('|')[:-1]]))
+
+    triangles = []
+    for line in open(f'{dirname}/local/t/{frameID}.txt'):
+        triangles.append(zip(*[tuple(map(float, c.split(' '))) for c in line.split('|')[:-1]]))
+
+    trees = [tuple(map(float, line.split(' '))) for line in open(f'{dirname}/local/pts/{frameID}.txt')]
     return polygons, triangles, trees
 
 
-def display_triangulation(plt_axis, dirname, frameID):
-    _, triangles, trees = get_obs(dirname, frameID)
+def display_triangulation(plt_axis, dirname, frameID, getObsFunc):
+    _, triangles, trees = getObsFunc(dirname, frameID)
     plt_axis.set_title(f"Frame {frameID} Triangulation")
     for i,x,y in triangles:
         plt_axis.fill(x, y, facecolor='none', edgecolor='black', linewidth=2)
@@ -47,8 +54,8 @@ def display_triangulation(plt_axis, dirname, frameID):
     for x, y in trees: plt_axis.plot(x, y, 'ro')
 
 
-def display_polygons(plt_axis, dirname, frameID):
-    polygons, _, _ = get_obs(dirname, frameID)
+def display_polygons(plt_axis, dirname, frameID, getObsFunc):
+    polygons, _, _ = getObsFunc(dirname, frameID)
     plt_axis.set_title(f"Frame {frameID} Polygons")
     for i,x,y in polygons:
         plt_axis.fill(x, y, facecolor=np.random.rand(3,))
@@ -56,10 +63,17 @@ def display_polygons(plt_axis, dirname, frameID):
 
 def draw_vis():
     # First row
-    display_triangulation(ax[0], directory, frameID)
+    display_triangulation(ax[0][0], directory, frameID+1, get_local_obs)
+    display_triangulation(ax[0][1], directory, frameID, get_global_obs)
 
     # Second row
-    display_polygons(ax[1], directory, frameID)
+    display_polygons(ax[1][0], directory, frameID+1, get_local_obs)
+    display_polygons(ax[1][1], directory, frameID, get_global_obs)
+
+    for line in open(f'{directory}/match/{frameID}.txt'):
+        if line == '': continue
+        p1, p2 = [tuple(map(float, c.split(','))) for c in line.split('|')]
+        ax[0][1].add_artist(ConnectionPatch(xyA=p1, xyB=p2, coordsA="data", coordsB="data", axesA=ax[0][0], axesB=ax[0][1], color="blue"))
     
     fig.canvas.draw()
 
@@ -84,9 +98,9 @@ frameID = args.frameID
 globalErrors = [float(val) for val in open(f'{directory}/global/!gError.txt')]
 
 # fig=plt.figure()
-fig, ax = plt.subplots(nrows=2, ncols=1)
+fig, ax = plt.subplots(nrows=2, ncols=2)
 fig.set_figheight(9)
-fig.set_figwidth(4)
+fig.set_figwidth(9)
 fig.canvas.mpl_connect('key_press_event', keypress)
 draw_vis()
 print('Press left and right to view different frames. Press "escape" to exit')

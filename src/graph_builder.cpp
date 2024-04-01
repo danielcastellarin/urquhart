@@ -282,6 +282,24 @@ struct SLAMGraph {
                      Aji,  -1;
                 B << -Aii, Aij,
                       Aji,   1;
+
+                // NaN checking:
+                if (XI_inv != XI_inv) {
+                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                    std::cout << "XI_inv bad\n" << XI_inv << "\nXI is\n" << XI << std::endl;
+                } else if (ZIJ_inv != ZIJ_inv) {
+                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                    std::cout << "ZIJ_inv bad\n" << ZIJ_inv << "\nZIJ is\n" << ZIJ << std::endl;
+                } else if (eIJ != eIJ) {
+                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                    std::cout << "eIJ bad\n" << eIJ << std::endl;
+                } else if (A != A) {
+                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                    std::cout << "A bad\n" << A << std::endl;
+                } else if (B != B) {
+                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                    std::cout << "B bad\n" << B << std::endl;
+                }
             }
 
             // Update H and b accordingly
@@ -325,6 +343,15 @@ struct SLAMGraph {
 
                 eIJ = (B * TransXIdiff) - edge.distance; // 2x1
                 A << -B, A2; // 2x3
+
+                // NaN checking:
+                if (A != A) {
+                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                    std::cout << "A bad\n" << A << std::endl;
+                } else if (B != B) {
+                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                    std::cout << "B bad\n" << B << std::endl;
+                }
             }
 
             // Update H and b accordingly
@@ -375,13 +402,104 @@ struct SLAMGraph {
         for (const auto& ple : plEdges) edgesOut << "P" << ple.src << " L" << ple.dst << " " << ple.distance.transpose() << std::endl;
 
         // Save global error to single file (overwriting)
+        computeGlobalError();
         for (const auto& ge : globalErrors) errOut << ge << std::endl;
 
         nodesOut.close();
         edgesOut.close();
+        errOut.close();
     }
 
 };
+
+
+
+// calculates squared error from two point mapping; assumes rotation around Origin.
+inline double sqErr_3Dof(PtLoc p1, PtLoc p2, double cos_alpha, double sin_alpha, PtLoc T) {
+
+    double x2_est = T(0) + cos_alpha * p1(0) - sin_alpha * p1(1);
+    double y2_est = T(1) + sin_alpha * p1(0) + cos_alpha * p1(1);
+    PtLoc p2_est({x2_est, y2_est});
+    PtLoc dp = p2_est-p2;
+    Eigen::RowVector2d dp = Eigen::RowVector2d{x2_est, y2_est} - p2.transpose();
+
+    return dp.dot(dp); // squared distance
+}
+
+// calculate RMSE for point-to-point metrics
+float RMSE_3Dof(const std::vector<PtLoc>& src, const std::vector<PtLoc>& dst,
+        const float* param, const bool* inliers, const PtLoc center) {
+
+    const bool all_inliers = (inliers==NULL); // handy when we run QUADRTATIC will all inliers
+    unsigned int n = src.size();
+    assert(n>0 && n==dst.size());
+
+    float ang_rad = param[0];
+    PtLoc T({param[1], param[2]});
+    float cos_alpha = cos(ang_rad);
+    float sin_alpha = sin(ang_rad);
+
+    double RMSE = 0.0;
+    int ninliers = 0;
+    for (unsigned int i=0; i<n; i++) {
+        if (all_inliers || inliers[i]) {
+            RMSE += sqErr_3Dof(src[i]-center, dst[i]-center, cos_alpha, sin_alpha, T);
+            ninliers++;
+        }
+    }
+
+    
+    if (ninliers>0)
+        return sqrt(RMSE/ninliers);
+    else
+        return 100000000;
+}
+
+// Sets inliers and returns their count
+inline int setInliers3Dof(const std::vector<PtLoc>& src, const std::vector<PtLoc>& dst,
+        bool* inliers,
+        const float* param,
+        const float max_er,
+        const PtLoc center) {
+
+    float ang_rad = param[0];
+    PtLoc T({param[1], param[2]});
+
+    // set inliers
+    unsigned int ninliers = 0;
+    unsigned int n = src.size();
+    assert(n>0 && n==dst.size());
+
+    float cos_ang = cos(ang_rad);
+    float sin_ang = sin(ang_rad);
+    float max_sqErr = max_er*max_er; // comparing squared values
+
+    if (inliers==NULL) {
+
+        // just get the number of inliers (e.g. after QUADRATIC fit only)
+        for (unsigned int i=0; i<n; i++) {
+
+            float sqErr = sqErr_3Dof(src[i]-center, dst[i]-center, cos_ang, sin_ang, T);
+            if ( sqErr < max_sqErr)
+                ninliers++;
+        }
+    } else  {
+
+        // get the number of inliers and set them (e.g. for RANSAC)
+        for (unsigned int i=0; i<n; i++) {
+
+            float sqErr = sqErr_3Dof(src[i]-center, dst[i]-center, cos_ang, sin_ang, T);
+            if ( sqErr < max_sqErr) {
+                inliers[i] = 1;
+                ninliers++;
+            } else {
+                inliers[i] = 0;
+            }
+        }
+    }
+
+    return ninliers;
+}
 
 
 
@@ -391,6 +509,8 @@ bool isDebug = false;
 std::string outputPath;
 
 void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
+    std::cout << "Received keyframe " << cloudMsg->header.seq << std::endl;
+
     // Take the points from the PointCloud2 message and create a geometric hierarchy from it
     pcl::PointCloud<pcl::PointXY> localCloud;
     pcl::fromROSMsg(*cloudMsg, localCloud);
@@ -398,8 +518,15 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     int idx = 0;
     for (const auto& p : localCloud) vectorOfTrees.col(idx++) = PtLoc{p.x, p.y};
     urquhart::Observation localObs(vectorOfTrees);
+    
+    std::cout << "Defined local observation for keyframe " << cloudMsg->header.seq << std::endl;
+    writeHierarchyFiles(localObs, outputPath+"/local", std::to_string(g.poseNodeList.size()+1)+".txt");
 
-    // TODO do different things depending on whether the global map is available
+    std::ofstream ptsOut(outputPath+"/local/pts/"+std::to_string(g.poseNodeList.size()+1)+".txt");
+    for(const auto& c : localObs.landmarks.colwise()) ptsOut << c(0) << " " << c(1) << std::endl;
+    ptsOut.close();
+
+    // Do different things depending on whether the global map is available
     if (g.geoHier == NULL) {
         // TODO determine what gets done when the global map is unavailable (might also occur when keyframe does not match with anything on the map)
         //      maybe I could modify the matching procedure a bit to iteratively loosen the matching constraints if not enough matches are found?
@@ -418,6 +545,9 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             g.addPLEdge(lIdx, position);
         }
 
+        std::cout << "Constructed initial global geometric hierarchy " << cloudMsg->header.seq << std::endl;
+        std::cout << "Initial tree positions:\n" << localObs.landmarks.transpose() << std::endl;
+
         // Do nothing else because we need to get more observations before optimizing
 
     } else {
@@ -427,6 +557,18 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // When global map is present:
         auto matchingPointIndices = matching::hierarchyIndexMatching(localObs, *g.geoHier, 5);
+        std::cout << "Obtained " << matchingPointIndices.size() << " point matches with the global frame." << std::endl;
+
+        // LOG MATCHES
+        std::ofstream matOut(outputPath+"/match/"+std::to_string(g.poseNodeList.size())+".txt");
+        for (const auto& [lIdx, gIdx] : matchingPointIndices) {
+            matOut << localObs.ldmkX(lIdx) << "," << localObs.ldmkY(lIdx) << "|";
+            matOut << g.geoHier->ldmkX(gIdx) << "," << g.geoHier->ldmkY(gIdx) << std::endl;
+        }
+        matOut.close();
+
+
+
         // Matching speed should not be a bottleneck when querying global representation
         // If faster speed desired, only elect global polygons that are a certain distance away from the previous pose  
         // if not enough matches are made, maybe drop the frame? or expand global polygon election range
@@ -446,7 +588,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Use the inlier point pairs to find the robot's current position wrt global frame
         Eigen::Matrix4d currentGlobalRobotPoseTf(computeRigid2DEuclidTf(localObs.landmarks, g.geoHier->landmarks, matchingPointIndices));
-
+        std::cout << "Calculated tf (local->global):\n" << currentGlobalRobotPoseTf << std::endl;
 
         // Define a new node and edge for the robot's estimated odometry
         // Keep the reference to the current PoseNode to use when creating landmark constraints
@@ -454,6 +596,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                                             currentGlobalRobotPoseTf(1,3), 
                                             atan2(currentGlobalRobotPoseTf(1,0), currentGlobalRobotPoseTf(0,0))};
         g.addPPEdge(robotPoseInGlobal);
+        std::cout << "New robot global pose: " << robotPoseInGlobal.transpose() << std::endl;
 
         // Add constraints for all local points that matched with existing landmarks
         std::unordered_set<Eigen::Index> localMatchedPointIndices;
@@ -462,12 +605,13 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             g.addPLEdge(gIdx, localPosition); // TODO for some reason, compiler not coercing slice into PtLoc?
             localMatchedPointIndices.insert(lIdx);
         }
+        std::cout << "Added constraints to existing landmarks." << std::endl;
 
         // Try to associate other local points in the global frame  
         bool hasNewLandmarks = false;
         for (int lIdx = 0; lIdx < localObs.landmarks.cols(); ++lIdx) {
             // Only process points that were not EXPLICITLY matched with existing landmarks
-            if (localMatchedPointIndices.find(lIdx) != localMatchedPointIndices.end()) {
+            if (localMatchedPointIndices.find(lIdx) == localMatchedPointIndices.end()) {
 
                 // Define this tree's local position as a homogeneous matrix
                 Eigen::Matrix4d localPointTf {
@@ -479,7 +623,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                 
                 // Obtain this point's observed position relative to the global frame
                 Eigen::Matrix4d globalLandmarkPosition = currentGlobalRobotPoseTf * localPointTf;
-                double nearestPointX = 0.75, nearestPointY = 0.75;
+                double nearestPointX = 0.75, nearestPointY = 0.75;  // meters
 
                 // Find the nearest existing landmark below the nearness threshold for the given point in the global frame
                 int nearestPointId = -1;
@@ -489,6 +633,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                     // TODO make this more robust
                     if (diffX < nearestPointX && diffY < nearestPointY) {
                         nearestPointX = diffX, nearestPointY = diffY, nearestPointId = gIdx;
+                        std::cout << "Matching local tree with landmark " << nearestPointId << std::endl;
                     }
                 }
                 // TODO maybe use the poincloud clustering/centroid stuff here too
@@ -505,6 +650,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
                     // Define a graph node for this point and add it to the statevector
                     g.addLandmarkNode(nearestPointId, globalXY);
+                    std::cout << "NEW LANDMARK: " << globalXY.transpose() << std::endl;
                 }
 
                 // Create a constraint for this landmark
@@ -513,12 +659,28 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             }
         }
 
+
         // Optimize the graph once
+        std::cout << "Optimizing graph... ";
         g.optimizeGraph();
+        std::cout << "   Done!" << std::endl;
+
+        std::cout << "Optimized tree positions:\n" << g.geoHier->landmarks.transpose() << std::endl;
+
+        
 
         // Overwrite or amend the geometric hierarchy depending on whether new landarks were found
-        if (hasNewLandmarks) g.geoHier->computeHierarchy();
-        else g.geoHier->recomputeEdgeLengths();
+        // if (hasNewLandmarks) g.geoHier->computeHierarchy();
+        // else g.geoHier->recomputeEdgeLengths();
+
+        if (hasNewLandmarks) {
+            std::cout << "Recomputing hierarchy." << std::endl;
+            g.geoHier->computeHierarchy();
+        } else {
+            std::cout << "Recomputing edge lengths." << std::endl;
+            g.geoHier->recomputeEdgeLengths();
+            // std::cout << "New edge lengths:\n" << g.geoHier->triangulationEdgeLengths << std::endl;
+        }
         
         
         // NOTE g.geoHier polygons will be handled below
@@ -550,10 +712,10 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     // Print the graph to a file (for debugging)
     if (isDebug) {
         std::cout << "Logging global data... ";
-        writeHierarchyFiles(*g.geoHier, outputPath, g.poseNodeList.size()+".txt");
+        writeHierarchyFiles(*g.geoHier, outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
         std::cout << "   Done!" << std::endl;
         std::cout << "Saving graph data... ";
-        g.writeGraphToFiles(outputPath, g.poseNodeList.size()+".txt");
+        g.writeGraphToFiles(outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
         std::cout << "   Done!" << std::endl;
     }
 
@@ -575,12 +737,20 @@ int main(int argc, char **argv) {
         outputPath = absolutePackagePath+"/output/"+outputPath;
         std::filesystem::remove_all(outputPath);
         std::filesystem::create_directory(outputPath);
-        std::filesystem::create_directory(outputPath+"/p");
-        std::filesystem::create_directory(outputPath+"/d");
-        std::filesystem::create_directory(outputPath+"/t");
-        std::filesystem::create_directory(outputPath+"/h");
-        std::filesystem::create_directory(outputPath+"/graph_nodes");
-        std::filesystem::create_directory(outputPath+"/graph_edges");
+        std::filesystem::create_directory(outputPath+"/global");
+        std::filesystem::create_directory(outputPath+"/global/p");
+        std::filesystem::create_directory(outputPath+"/global/d");
+        std::filesystem::create_directory(outputPath+"/global/t");
+        std::filesystem::create_directory(outputPath+"/global/h");
+        std::filesystem::create_directory(outputPath+"/global/graph_nodes");
+        std::filesystem::create_directory(outputPath+"/global/graph_edges");
+        std::filesystem::create_directory(outputPath+"/local");
+        std::filesystem::create_directory(outputPath+"/local/p");
+        std::filesystem::create_directory(outputPath+"/local/d");
+        std::filesystem::create_directory(outputPath+"/local/t");
+        std::filesystem::create_directory(outputPath+"/local/h");
+        std::filesystem::create_directory(outputPath+"/local/pts");
+        std::filesystem::create_directory(outputPath+"/match");
         std::cout << "   Done!" << std::endl;
     }
 

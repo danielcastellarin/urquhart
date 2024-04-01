@@ -13,28 +13,30 @@ def keypress(event):
         plt.close()
     else:
         # plt.clf()   # clear
-        for a in ax.flatten(): a.cla()
+        # for a in ax.flatten(): a.cla()
+        ax.cla()
         if event.key == 'left' and 1 <= frameID-1:
             frameID -= 1
-        elif event.key == 'right' and frameID+1 < len(globalErrors):
+        elif event.key == 'right' and frameID+1 < len(globalErrors)+1:
             frameID += 1
-        display_things()
+        display_things(ax, directory, frameID)
 
 
 def getGraphAtFrame(dirname, frameID):
     poseNodes, ldmkNodes = {}, {}
-    for line in open(f'{dirname}/graph_nodes/{frameID}.txt'):
+    for line in open(f'{dirname}/global/graph_nodes/{frameID}.txt'):
         vals = line.split(' ')
-        if vals[0][0] == 'P': poseNodes[vals[0]] = tuple(map(float, vals[1:]))
-        else: ldmkNodes[vals[0]] = tuple(map(float, vals[1:]))
+        if vals[0][0] == 'P': poseNodes[vals[0]] = tuple(map(float, [n for n in vals[1:] if n != ""]))
+        else: ldmkNodes[vals[0]] = tuple(map(float, [n for n in vals[1:] if n != ""]))
 
     ppEdges, plEdges = [], []
-    for line in open(f'{dirname}/graph_edges/{frameID}.txt'):
+    for line in open(f'{dirname}/global/graph_edges/{frameID}.txt'):
         vals = line.split(' ')
-        if vals[1][0] == 'P': ppEdges.append(tuple(vals[0], vals[1], tuple(map(float, vals[2:]))))
-        else: plEdges.append(tuple(vals[0], vals[1], tuple(map(float, vals[2:]))))
+        if vals[1][0] == 'P': ppEdges.append((vals[0], vals[1], tuple(map(float, [n for n in vals[2:] if n != ""]))))
+        else: plEdges.append((vals[0], vals[1], tuple(map(float, [n for n in vals[2:] if n != ""]))))
     
     return poseNodes, ldmkNodes, ppEdges, plEdges, globalErrors[frameID-1] # frameIDs are base-1 this time
+    # return poseNodes, ldmkNodes, ppEdges, plEdges, 0 # frameIDs are base-1 this time
 
 
 def display_things(plt_axis, dirname, frameID):
@@ -77,13 +79,13 @@ directory = args.dirname
 frameID = args.frameID
 
 # Get all global errors beforehand
-globalErrors = [float(val) for val in open(f'{directory}/!gError.txt')]
+globalErrors = [float(val) for val in open(f'{directory}/global/!gError.txt')]
 
 # fig=plt.figure()
 fig, ax = plt.subplots(nrows=1, ncols=1)
 fig.set_figheight(4)
 fig.set_figwidth(4)
 fig.canvas.mpl_connect('key_press_event', keypress)
-display_things()
+display_things(ax, directory, frameID)
 print('Press left and right to view different frames. Press "escape" to exit')
 plt.show()

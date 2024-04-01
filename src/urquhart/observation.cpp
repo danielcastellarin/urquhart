@@ -159,7 +159,7 @@ void Observation::delaunayTriangulationFromScratch(std::vector<Polygon>& polygon
                    qhull_points.count(), qhull_points.coordinates(), "Qt Qbb Qc Qz Q12 d");
 
     // Facet ids are confusing; we want to map the good facets in order of appearance
-    size_t fIdx = 0;                // <---- This value resolves to the number of triangles we made
+    size_t fIdx = 0;                // <---- This value will equate to the number of Delaunay triangles
     std::map<size_t, size_t> id_map;
     for (const auto& e : q.facetList()) {
         if (e.isGood()) id_map[e.id()] = ++fIdx;
@@ -168,8 +168,8 @@ void Observation::delaunayTriangulationFromScratch(std::vector<Polygon>& polygon
     // n = #vertices, h = #vertices in convex hull 
     // edges in triangulation       = 3n - h - 3
     // triangles in triangulation   = 2n - h - 2
-    // THEREFORE --> #edges = #triangles + n + 1
-    int numEdges = fIdx + landmarks.cols() + 1, edgeListIdx = 0, polygonIdx = 0;
+    // THEREFORE --> #edges = #triangles + n - 1
+    int numEdges = fIdx + landmarks.cols() - 1, edgeListIdx = 0, polygonIdx = 0;
 
     // Reserve space to store polygon and edge data for geometric hierarchy
     polygons.resize(fIdx);

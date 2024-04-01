@@ -15,21 +15,21 @@ def keypress(event):
         for a in ax.flatten(): a.cla()
         if event.key == 'left' and 1 <= frameID-1:  # base-1 this time
             frameID -= 1
-        elif event.key == 'right' and frameID+1 < len(globalErrors)+1:
+        elif event.key == 'right' and frameID+1 < len(globalErrors)+2:
             frameID += 1
         draw_vis()
 
 
 def get_obs(dirname, frameID):
     polygons = []
-    for line in open(f'{dirname}/global/p/{frameID}.txt'):
+    for line in open(f'{dirname}/local/p/{frameID}.txt'):
         polygons.append(zip(*[tuple(map(float, c.split(' '))) for c in line.split('|')[:-1]]))
 
     triangles = []
-    for line in open(f'{dirname}/global/t/{frameID}.txt'):
+    for line in open(f'{dirname}/local/t/{frameID}.txt'):
         triangles.append(zip(*[tuple(map(float, c.split(' '))) for c in line.split('|')[:-1]]))
 
-    trees = [tuple(map(float, [n for n in line.split(' ')[1:] if n != ""])) for line in open(f'{dirname}/global/graph_nodes/{frameID}.txt') if line.split(' ')[0][0] == 'L']
+    trees = [tuple(map(float, line.split(' '))) for line in open(f'{dirname}/local/pts/{frameID}.txt')]
     # trees = []
     # for line in open(f'{dirname}/graph_nodes/{frameID}.txt'):
     #     if line.split(' ')[0][0] == 'L':
