@@ -196,8 +196,8 @@ struct SLAMGraph {
     }
     void addPPEdge(Eigen::Vector3d& currentGlobalPose) {
         // This only gets called once per keyframe (at most)
+        ppEdges.push_back(PPEdge(poseNodeList.size()-1, poseNodeList.size(), currentGlobalPose - poseNodeList.back().pose));
         addPoseNode(currentGlobalPose);
-        ppEdges.push_back(PPEdge(poseNodeList.size()-2, poseNodeList.size()-1, currentGlobalPose - poseNodeList.back().pose));
     }
     
     void addLandmarkNode(int idxInHier, PtLoc& position) {
@@ -237,9 +237,11 @@ struct SLAMGraph {
             Eigen::Vector3d x(stateVector.segment(iStart, 3));
             Eigen::Vector2d l(stateVector.segment(jStart, 2)), eIJ;
             float s = sin(x(2)), c = cos(x(2));
-            Eigen::Matrix2d R_transposed;
-            // Eigen::Matrix2f R_transposed {c, s, -s, c}; // TODO check if valid init?
-            R_transposed << c, s,-s, c;
+            Eigen::Matrix2d R_transposed {
+                { c, s},
+                {-s, c}
+            };
+            // R_transposed << c, s,-s, c;
             eIJ = (R_transposed * (l - x.head(2))) - edge.distance; // 2x1
             gErr += eIJ.transpose() * edge.info * eIJ;
         }
@@ -247,11 +249,11 @@ struct SLAMGraph {
         globalErrors.push_back(gErr);
     }
 
-    void optimizeGraph() {
+    void optimizeGraph(std::string myOutputPath) {
         
         // Initialize sparse system H and coefficient vector b
-        Eigen::MatrixXd H(stateVector.size(), stateVector.size());
-        Eigen::VectorXd b(stateVector.size());
+        Eigen::MatrixXd H = Eigen::MatrixXd::Zero(stateVector.size(), stateVector.size());
+        Eigen::VectorXd b = Eigen::VectorXd::Zero(stateVector.size());
         bool isFirstThereforeAddPrior = true;
 
         // Resolve pose-pose constraints
@@ -261,6 +263,14 @@ struct SLAMGraph {
             auto iSlice = Eigen::seqN(getPoseSVIdx(edge.src), 3), jSlice = Eigen::seqN(getPoseSVIdx(edge.dst), 3);
             Eigen::Vector3d xI(stateVector(iSlice)), xJ(stateVector(jSlice));
 
+            // std::cout << "Pose " << poseNodeList[edge.src].id << " (" << xI.transpose() << ") -> Pose " << poseNodeList[edge.dst].id << " (" << xJ.transpose() << ")\n"; 
+            
+            // std::cout << "Pose " << poseNodeList[edge.src].id << " -> Pose " << poseNodeList[edge.dst].id << ": (" << edge.distance.transpose() << ")\n";
+            
+            // if (isFirstThereforeAddPrior) {
+            //     std::cout << "xI:\n" << xI.transpose() << "\nxJ:\n" << xJ.transpose() << std::endl;
+            // }
+
             // Use xI, xJ, and dist (aka z) to compute error eIJ and jacobians A,B
             Eigen::Vector3d eIJ;
             Eigen::Matrix3d A, B;
@@ -268,39 +278,47 @@ struct SLAMGraph {
                 Eigen::Matrix3d XI = v2t(xI), XJ = v2t(xJ), ZIJ = v2t(edge.distance);
                 Eigen::Matrix3d XI_inv = XI.inverse(), ZIJ_inv = ZIJ.inverse();
 
-                eIJ = t2v(ZIJ_inv * (XI_inv * XJ)); // TODO make sure eigen is doing mult correctly
+                eIJ = t2v(ZIJ_inv * (XI_inv * XJ));
 
-                Eigen::Matrix2d RotXI = XI.block(0,0,2,2), RotZIJ = ZIJ.block(0,0,2,2); // TODO make sure this is grabbing the rotation matrix
+                Eigen::Matrix2d RotXI = XI.block(0,0,2,2), RotZIJ = ZIJ.block(0,0,2,2);
                 Eigen::Vector2d TransXI = xI.head(2), TransXJ = xJ.head(2); // the lazy way
 
-                Eigen::Matrix2d Aii = -RotZIJ.transpose() * RotXI.transpose(), RotXI_derived;
-                RotXI_derived << XI(0,1), XI(0,0),
-                                -XI(0,0), XI(0,1);
-                Eigen::Vector2d Aij = (RotZIJ * RotXI_derived) * (TransXJ - TransXI), Bij{0,0};
+                Eigen::Matrix2d Aii = -RotZIJ.transpose() * RotXI.transpose(), 
+                RotXI_derived {
+                    { XI(0,1), XI(0,0)},
+                    {-XI(0,0), XI(0,1)}
+                };
+                
+                Eigen::Vector2d Aij = (RotZIJ.transpose() * RotXI_derived) * (TransXJ - TransXI), Bij{0,0};
                 Eigen::RowVector2d Aji{0,0}, Bji{0,0};
+                
                 A << Aii, Aij,
                      Aji,  -1;
-                B << -Aii, Aij,
-                      Aji,   1;
+                B << -Aii, Bij,
+                      Bji,   1;
 
                 // NaN checking:
-                if (XI_inv != XI_inv) {
-                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                    std::cout << "XI_inv bad\n" << XI_inv << "\nXI is\n" << XI << std::endl;
-                } else if (ZIJ_inv != ZIJ_inv) {
-                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                    std::cout << "ZIJ_inv bad\n" << ZIJ_inv << "\nZIJ is\n" << ZIJ << std::endl;
-                } else if (eIJ != eIJ) {
-                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                    std::cout << "eIJ bad\n" << eIJ << std::endl;
-                } else if (A != A) {
-                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                    std::cout << "A bad\n" << A << std::endl;
-                } else if (B != B) {
-                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                    std::cout << "B bad\n" << B << std::endl;
-                }
+                // if (XI_inv != XI_inv) {
+                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                //     std::cout << "XI_inv bad\n" << XI_inv << "\nXI is\n" << XI << std::endl;
+                // } else if (ZIJ_inv != ZIJ_inv) {
+                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                //     std::cout << "ZIJ_inv bad\n" << ZIJ_inv << "\nZIJ is\n" << ZIJ << std::endl;
+                // } else if (eIJ != eIJ) {
+                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                //     std::cout << "eIJ bad\n" << eIJ << std::endl;
+                // } else if (A != A) {
+                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                //     std::cout << "A bad\n" << A << std::endl;
+                // } else if (B != B) {
+                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                //     std::cout << "B bad\n" << B << std::endl;
+                // }
             }
+
+            // if (isFirstThereforeAddPrior) {
+            //     std::cout << "eij:\n" << eIJ.transpose() << "\nA:\n" << A << "\nB:\n" << B << std::endl;
+            // }
 
             // Update H and b accordingly
             b(iSlice) += eIJ.transpose() * edge.info * A;
@@ -320,13 +338,21 @@ struct SLAMGraph {
             }
         }
 
-
+        isFirstThereforeAddPrior = true;
         // Resolve pose-landmark constraints
         for (auto& edge : plEdges) {
             // Obtain node states from the state vector
             auto iSlice = Eigen::seqN(getPoseSVIdx(edge.src), 3), jSlice = Eigen::seqN(getLdmkSVIdx(edge.dst), 2);
             Eigen::Vector3d x(stateVector(iSlice));
             Eigen::Vector2d l(stateVector(jSlice));
+
+            // std::cout << "Pose " << poseNodeList[edge.src].id << " (" << x.transpose() << ") -> Landmark " << landmarkNodeList[edge.dst].globalReprIdx << " (" << l.transpose() << ")\n"; 
+            
+            // std::cout << "Pose " << poseNodeList[edge.src].id << " -> Landmark " << landmarkNodeList[edge.dst].globalReprIdx << ": (" << edge.distance.transpose() << ")\n";
+
+            // if (isFirstThereforeAddPrior && poseNodeList[edge.src].id == 1) {
+            //     std::cout << "x:\n" << x.transpose() << "\nl:\n" << l.transpose() << std::endl;
+            // }
 
             // Use xI, xJ, and dist (aka z) to compute error eIJ and jacobians A,B
             Eigen::Vector2d eIJ;
@@ -336,23 +362,42 @@ struct SLAMGraph {
                 double s = sin(x(2)), c = cos(x(2));
                 B << c, s, // B is just the rotation matrix of x transposed
                     -s, c;
-                Eigen::Matrix2d RotX_derived;
-                RotX_derived << -s,  c,
-                                -c, -s;
+                Eigen::Matrix2d RotX_derived {
+                    {-s,  c},
+                    {-c, -s}
+                };
                 Eigen::Vector2d TransXIdiff = l - x.head(2), A2 = RotX_derived * TransXIdiff;
+                // if (isFirstThereforeAddPrior && poseNodeList[edge.src].id == 1) {
+                //     std::cout << "B:\n" << B << std::endl;
+                //     std::cout << "TransXIdiff:\n" << TransXIdiff << std::endl;
+                //     std::cout << "z:\n" << edge.distance << std::endl;
+                //     std::cout << "B * TransXIdiff:\n" << B * TransXIdiff << std::endl;
+                //     std::cout << "(B * TransXIdiff) - z:\n" << (B * TransXIdiff) - edge.distance << std::endl;
+                //     Eigen::Vector2d mult = B * TransXIdiff;
+                //     std::cout << "x: " << mult(0) - edge.distance(0) << "\ny: " << mult(1) - edge.distance(1) << std::endl;
+                // }
 
                 eIJ = (B * TransXIdiff) - edge.distance; // 2x1
                 A << -B, A2; // 2x3
 
                 // NaN checking:
-                if (A != A) {
-                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                    std::cout << "A bad\n" << A << std::endl;
-                } else if (B != B) {
-                    std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                    std::cout << "B bad\n" << B << std::endl;
-                }
+                // if (A != A) {
+                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                //     std::cout << "A bad\n" << A << std::endl;
+                // } else if (B != B) {
+                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
+                //     std::cout << "B bad\n" << B << std::endl;
+                // }
             }
+
+            // if (isFirstThereforeAddPrior && poseNodeList[edge.src].id == 1) {
+            //     std::cout << "eij:\n" << eIJ.transpose() << "\nA:\n" << A << "\nB:\n" << B << std::endl;
+            //     isFirstThereforeAddPrior = false;
+            // }
+            // if (isFirstThereforeAddPrior && poseNodeList[edge.src].id == 1) {
+            //     std::cout << "bislice:\n" << eIJ.transpose() * edge.info * A << std::endl;
+            //     isFirstThereforeAddPrior = false;
+            // }
 
             // Update H and b accordingly
             b(iSlice) += eIJ.transpose() * edge.info * A;
@@ -365,7 +410,27 @@ struct SLAMGraph {
         }
 
         // Update the state vector; according to the result of the system of equations
-        stateVector += H.llt().solve(b);
+        // stateVector += H.llt().solve(b);
+        // stateVector -= H.llt().solve(b);
+        // stateVector -= H.ldlt().solve(b);
+
+
+        std::ofstream mOut(myOutputPath+"m.txt");
+        mOut << H << std::endl << std::endl << b;
+        mOut.close();
+
+
+        Eigen::VectorXd dx = -H.llt().solve(b), newSV = stateVector + dx;
+        // Eigen::VectorXd dx = -H * b, newSV = stateVector + dx;
+        Eigen::Matrix<double, -1, 3> comb(dx.size(), 3);
+        comb << stateVector, dx, newSV;
+        // std::cout << "Original state vector\t|dx\t\t|New state vector\n" << comb << std::endl;
+
+        std::ofstream vOut(myOutputPath+"v.txt");
+        vOut << comb;
+        vOut.close();
+        
+        stateVector += dx;
         /* NOTE THE ARCANE KNOWLEDGE OF SOLVING LINEAR SYSTEMS WITH EIGEN 
 
         // Solve Ax = b. Result stored in x. Matlab: x = A \ b.
@@ -383,9 +448,11 @@ struct SLAMGraph {
 
         // Copy data from the state vector into graph nodes (for easier access)
         for (auto& node : poseNodeList) {
+            std::cout << "Pose " << node.id << " old=(" << node.pose.transpose() << "),  new=(" << stateVector.segment(node.stateVectorIdx, 3).transpose() << ")\n"; 
             node.pose = stateVector.segment(node.stateVectorIdx, 3);
         }
         for (auto& node : landmarkNodeList) {
+            std::cout << "Landmark " << node.globalReprIdx << " old=(" << geoHier->landmarks.col(node.globalReprIdx).transpose() << "),  new=(" << stateVector.segment(node.stateVectorIdx, 2).transpose() << ")\n"; 
             geoHier->landmarks.col(node.globalReprIdx) = stateVector.segment(node.stateVectorIdx, 2);
         }
     }
@@ -414,92 +481,78 @@ struct SLAMGraph {
 
 
 
-// calculates squared error from two point mapping; assumes rotation around Origin.
-inline double sqErr_3Dof(PtLoc p1, PtLoc p2, double cos_alpha, double sin_alpha, PtLoc T) {
+// // calculates squared error from two point mapping; assumes rotation around Origin.
+// inline double sqErr_3Dof(PtLoc p1, PtLoc p2, double cos_alpha, double sin_alpha, PtLoc T) {
 
-    double x2_est = T(0) + cos_alpha * p1(0) - sin_alpha * p1(1);
-    double y2_est = T(1) + sin_alpha * p1(0) + cos_alpha * p1(1);
-    PtLoc p2_est({x2_est, y2_est});
-    PtLoc dp = p2_est-p2;
-    Eigen::RowVector2d dp = Eigen::RowVector2d{x2_est, y2_est} - p2.transpose();
+//     double x2_est = T(0) + cos_alpha * p1(0) - sin_alpha * p1(1);
+//     double y2_est = T(1) + sin_alpha * p1(0) + cos_alpha * p1(1);
+//     PtLoc p2_est({x2_est, y2_est});
 
-    return dp.dot(dp); // squared distance
-}
+//     return (p2_est - p2).array().square().sum(); // squared distance
+// }
 
-// calculate RMSE for point-to-point metrics
-float RMSE_3Dof(const std::vector<PtLoc>& src, const std::vector<PtLoc>& dst,
-        const float* param, const bool* inliers, const PtLoc center) {
+// // calculate RMSE for point-to-point metrics
+// float RMSE_3Dof(const std::vector<PtLoc>& src, const std::vector<PtLoc>& dst,
+//         const float* param, const bool* inliers, const PtLoc center) {
 
-    const bool all_inliers = (inliers==NULL); // handy when we run QUADRTATIC will all inliers
-    unsigned int n = src.size();
-    assert(n>0 && n==dst.size());
+//     const bool all_inliers = (inliers==NULL); // handy when we run QUADRTATIC will all inliers
+//     unsigned int n = src.size();
+//     assert(n>0 && n==dst.size());
 
-    float ang_rad = param[0];
-    PtLoc T({param[1], param[2]});
-    float cos_alpha = cos(ang_rad);
-    float sin_alpha = sin(ang_rad);
+//     float ang_rad = param[0];
+//     PtLoc T({param[1], param[2]});
+//     float cos_alpha = cos(ang_rad);
+//     float sin_alpha = sin(ang_rad);
 
-    double RMSE = 0.0;
-    int ninliers = 0;
-    for (unsigned int i=0; i<n; i++) {
-        if (all_inliers || inliers[i]) {
-            RMSE += sqErr_3Dof(src[i]-center, dst[i]-center, cos_alpha, sin_alpha, T);
-            ninliers++;
-        }
-    }
+//     double RMSE = 0.0;
+//     int ninliers = 0;
+//     for (unsigned int i=0; i<n; i++) {
+//         if (all_inliers || inliers[i]) {
+//             RMSE += sqErr_3Dof(src[i]-center, dst[i]-center, cos_alpha, sin_alpha, T);
+//             ninliers++;
+//         }
+//     }
 
     
-    if (ninliers>0)
-        return sqrt(RMSE/ninliers);
-    else
-        return 100000000;
-}
+//     if (ninliers>0)
+//         return sqrt(RMSE/ninliers);
+//     else
+//         return 100000000;
+// }
 
-// Sets inliers and returns their count
-inline int setInliers3Dof(const std::vector<PtLoc>& src, const std::vector<PtLoc>& dst,
-        bool* inliers,
-        const float* param,
-        const float max_er,
-        const PtLoc center) {
+// // Sets inliers and returns their count
+// inline int setInliers3Dof(const std::vector<PtLoc>& src, const std::vector<PtLoc>& dst,
+//         bool* inliers,
+//         const float* param,
+//         const float max_er,
+//         const PtLoc center) {
 
-    float ang_rad = param[0];
-    PtLoc T({param[1], param[2]});
+//     float ang_rad = param[0];
+//     PtLoc T({param[1], param[2]});
 
-    // set inliers
-    unsigned int ninliers = 0;
-    unsigned int n = src.size();
-    assert(n>0 && n==dst.size());
+//     // set inliers
+//     unsigned int ninliers = 0;
+//     unsigned int n = src.size();
+//     assert(n>0 && n==dst.size());
 
-    float cos_ang = cos(ang_rad);
-    float sin_ang = sin(ang_rad);
-    float max_sqErr = max_er*max_er; // comparing squared values
+//     float cos_ang = cos(ang_rad);
+//     float sin_ang = sin(ang_rad);
+//     float max_sqErr = max_er*max_er; // comparing squared values
 
-    if (inliers==NULL) {
+//     // get the number of inliers and set them 
+//     for (unsigned int i=0; i<n; i++) {
 
-        // just get the number of inliers (e.g. after QUADRATIC fit only)
-        for (unsigned int i=0; i<n; i++) {
+//         float sqErr = sqErr_3Dof(src[i]-center, dst[i]-center, cos_ang, sin_ang, T);
+//         if ( sqErr < max_sqErr) {
+//             inliers[i] = 1;
+//             ninliers++;
+//         } else {
+//             inliers[i] = 0;
+//         }
+//     }
 
-            float sqErr = sqErr_3Dof(src[i]-center, dst[i]-center, cos_ang, sin_ang, T);
-            if ( sqErr < max_sqErr)
-                ninliers++;
-        }
-    } else  {
-
-        // get the number of inliers and set them (e.g. for RANSAC)
-        for (unsigned int i=0; i<n; i++) {
-
-            float sqErr = sqErr_3Dof(src[i]-center, dst[i]-center, cos_ang, sin_ang, T);
-            if ( sqErr < max_sqErr) {
-                inliers[i] = 1;
-                ninliers++;
-            } else {
-                inliers[i] = 0;
-            }
-        }
-    }
-
-    return ninliers;
-}
+//     return ninliers;
+// }
 
 
 
@@ -564,6 +617,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         for (const auto& [lIdx, gIdx] : matchingPointIndices) {
             matOut << localObs.ldmkX(lIdx) << "," << localObs.ldmkY(lIdx) << "|";
             matOut << g.geoHier->ldmkX(gIdx) << "," << g.geoHier->ldmkY(gIdx) << std::endl;
+            // std::cout << std::sqrt((localObs.landmarks.col(lIdx) - g.geoHier->landmarks.col(gIdx)).array().square().sum()) << std::endl;
         }
         matOut.close();
 
@@ -604,6 +658,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             PtLoc localPosition = localObs.landmarks.col(lIdx);
             g.addPLEdge(gIdx, localPosition); // TODO for some reason, compiler not coercing slice into PtLoc?
             localMatchedPointIndices.insert(lIdx);
+            // std::cout << "L: " << localObs.landmarks.col(lIdx).transpose() << ", G: " << g.geoHier->landmarks.col(gIdx) << std::endl;
         }
         std::cout << "Added constraints to existing landmarks." << std::endl;
 
@@ -662,7 +717,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Optimize the graph once
         std::cout << "Optimizing graph... ";
-        g.optimizeGraph();
+        g.optimizeGraph(outputPath+"/HB/"+std::to_string(cloudMsg->header.seq));
         std::cout << "   Done!" << std::endl;
 
         std::cout << "Optimized tree positions:\n" << g.geoHier->landmarks.transpose() << std::endl;
@@ -751,6 +806,7 @@ int main(int argc, char **argv) {
         std::filesystem::create_directory(outputPath+"/local/h");
         std::filesystem::create_directory(outputPath+"/local/pts");
         std::filesystem::create_directory(outputPath+"/match");
+        std::filesystem::create_directory(outputPath+"/HB");
         std::cout << "   Done!" << std::endl;
     }
 

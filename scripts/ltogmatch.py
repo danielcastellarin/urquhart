@@ -15,7 +15,7 @@ def keypress(event):
         for a in ax.flatten(): a.cla()
         if event.key == 'left' and 1 <= frameID-1:  # base-1 this time
             frameID -= 1
-        elif event.key == 'right' and frameID+1 < len(globalErrors)+1:
+        elif event.key == 'right' and frameID+1 < len(globalErrors):
             frameID += 1
         draw_vis()
 
