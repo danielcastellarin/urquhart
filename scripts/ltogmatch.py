@@ -15,9 +15,10 @@ def keypress(event):
         for a in ax.flatten(): a.cla()
         if event.key == 'left' and 1 <= frameID-1:  # base-1 this time
             frameID -= 1
+            draw_vis()
         elif event.key == 'right' and frameID+1 < len(globalErrors):
             frameID += 1
-        draw_vis()
+            draw_vis()
 
 
 def get_global_obs(dirname, frameID):
@@ -45,30 +46,30 @@ def get_local_obs(dirname, frameID):
     return polygons, triangles, trees
 
 
-def display_triangulation(plt_axis, dirname, frameID, getObsFunc):
+def display_triangulation(plt_axis, dirname, frameID, getObsFunc, headTitle):
     _, triangles, trees = getObsFunc(dirname, frameID)
-    plt_axis.set_title(f"Frame {frameID} Triangulation")
+    plt_axis.set_title(f"{headTitle} Triangulation - {frameID}")
     for i,x,y in triangles:
         plt_axis.fill(x, y, facecolor='none', edgecolor='black', linewidth=2)
-        plt_axis.text(sum(x)/3, sum(y)/3, int(i[0]))
+        # plt_axis.text(sum(x)/3, sum(y)/3, int(i[0]))
     for x, y in trees: plt_axis.plot(x, y, 'ro')
 
 
-def display_polygons(plt_axis, dirname, frameID, getObsFunc):
+def display_polygons(plt_axis, dirname, frameID, getObsFunc, headTitle):
     polygons, _, _ = getObsFunc(dirname, frameID)
-    plt_axis.set_title(f"Frame {frameID} Polygons")
+    plt_axis.set_title(f"{headTitle} Polygons - {frameID}")
     for i,x,y in polygons:
         plt_axis.fill(x, y, facecolor=np.random.rand(3,))
-        plt_axis.text(sum(x)/len(x), sum(y)/len(y), int(i[0]))
+        # plt_axis.text(sum(x)/len(x), sum(y)/len(y), int(i[0]))
 
 def draw_vis():
     # First row
-    display_triangulation(ax[0][0], directory, frameID+1, get_local_obs)
-    display_triangulation(ax[0][1], directory, frameID, get_global_obs)
+    display_triangulation(ax[0][0], directory, frameID+1, get_local_obs, "Local")
+    display_triangulation(ax[0][1], directory, frameID, get_global_obs, "Global")
 
     # Second row
-    display_polygons(ax[1][0], directory, frameID+1, get_local_obs)
-    display_polygons(ax[1][1], directory, frameID, get_global_obs)
+    display_polygons(ax[1][0], directory, frameID+1, get_local_obs, "Local")
+    display_polygons(ax[1][1], directory, frameID, get_global_obs, "Global")
 
     for line in open(f'{directory}/match/{frameID}.txt'):
         if line == '': continue

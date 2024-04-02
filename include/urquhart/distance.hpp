@@ -39,6 +39,10 @@ inline double euclideanDistance2D(const PtLoc& A, const PtLoc& B) {
   return std::sqrt((A - B).array().square().sum());
 }
 
+inline double squaredDistance2D(const PtLoc& A, const PtLoc& B) {
+  return (A - B).array().square().sum();
+}
+
 // Get the squared distance of every sampled point to a centroid
 inline Eigen::VectorXd centroidDistance(const Points& samples, const Eigen::Vector2d& centroid) {
   Points centroidMatrix(2, samples.cols());

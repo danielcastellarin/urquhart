@@ -53,12 +53,6 @@ Eigen::Matrix4d computeRigid2DEuclidTf(const Points& localLandmarks, const Point
     Eigen::Vector4d x = (A.transpose() * A).inverse() * A.transpose() * b;
 
     // Return the 4x4 matrix to transform frames: reference --> target
-    // Eigen::Matrix4d tf;
-    // tf << x[0], -x[1], 0, x[2],
-    //       x[1],  x[0], 0, x[3],
-    //          0,     0, 1,    0,
-    //          0,     0, 0,    1;
-    // return tf;
     return Eigen::Matrix4d{
         {x[0], -x[1], 0, x[2]},
         {x[1],  x[0], 0, x[3]},
@@ -103,20 +97,14 @@ Eigen::Matrix4d computeRigid2DEuclidTf(const Points& localLandmarks, const Point
 struct PoseNode { // Pose derived from matching local shapes with global representation
     int id, stateVectorIdx;
     Eigen::Vector3d pose;
-    PoseNode() : id(0) {}
-    PoseNode(int i, double a, double b, double c) : id(i), pose({a,b,c}) {}
-    PoseNode(int i, Eigen::Vector3d& p) : id(i), pose(p) {}
-    PoseNode(int i, double a, double b, double c, int svPos) : id(i), pose({a,b,c}), stateVectorIdx(svPos) {}
     PoseNode(int i, Eigen::Vector3d& p, int svPos) : id(i), pose(p), stateVectorIdx(svPos) {}
     bool operator==(const PoseNode &other) const{ return id == other.id; }
-    // std::string toString() const { return std::to_string(id) + ":(" + std::to_string(pose(0)) + "," + std::to_string(pose(1)) + "," + std::to_string(pose(2)) + ")"; }
 };
 
 struct LandmarkNode { // Point location derived from matching local shapes with global representation
     int globalReprIdx, stateVectorIdx; // ID corresponds to the landmark's column number in the global observation record
     LandmarkNode(int i, int svPos) : globalReprIdx(i), stateVectorIdx(svPos) {}
     bool operator==(const LandmarkNode &other) const{ return globalReprIdx == other.globalReprIdx; }
-    // std::string toString() const { return std::to_string(id) + ":(" + std::to_string(position(0)) + "," + std::to_string(position(1)) + ")"; }
 };
 
 
@@ -125,7 +113,7 @@ struct LandmarkNode { // Point location derived from matching local shapes with 
 
 struct PPEdge { // Point location derived from matching local shapes with global representation
     int src, dst; // indices in the list of pose nodes for the source and destination of this edge
-    Eigen::Vector3d distance;   // difference in position between the poses on either side of this edge
+    Eigen::Vector3d distance;   // difference in position between the robot poses constrained by this edge
     Eigen::Matrix3d info;       // inverse covariance matrix for 'distance'
     PPEdge() {}
     PPEdge(int source, int destination, Eigen::Vector3d d) : src(source), dst(destination), distance(d) {
@@ -137,7 +125,7 @@ struct PPEdge { // Point location derived from matching local shapes with global
 
 struct PLEdge {
     int src, dst;      // indices in the lists of pose and landmark nodes respectively for the source and destination of this edge
-    Eigen::Vector2d distance;   // difference in position between the observing robot and the landmark
+    Eigen::Vector2d distance;   // the observed position of a landmark relative to the robot
     Eigen::Matrix2d info;       // inverse covariance matrix for 'distance'
     PLEdge() {}
     PLEdge(int source, int destination, Eigen::Vector2d d) : src(source), dst(destination), distance(d) {
@@ -149,16 +137,11 @@ struct PLEdge {
 // USED ONLY FOR GRAPHSLAM MATH
 Eigen::Matrix3d v2t(Eigen::Vector3d vec) {
     double c = cos(vec(2)), s = sin(vec(2));
-    Eigen::Matrix3d tf;
-    tf << c, -s, vec(0),
-          s,  c, vec(1),
-          0,  0,    1;
-    return tf;
-    // return Eigen::Matrix3d {
-    //     {c, -s, vec(0)},
-    //     {s,  c, vec(1)},
-    //     {0,  0,      1}
-    // };
+    return Eigen::Matrix3d {
+        {c, -s, vec(0)},
+        {s,  c, vec(1)},
+        {0,  0,      1}
+    };
 }
 
 Eigen::Vector3d t2v(Eigen::Matrix3d tf) { 
@@ -171,14 +154,13 @@ struct SLAMGraph {
     std::shared_ptr<urquhart::Observation> geoHier = NULL;
     Eigen::VectorXd stateVector; // stored as eigen vector for faster computations??
 
-    // If node postions in state vector are stored in nodes...
     std::vector<PoseNode> poseNodeList;
-    std::vector<LandmarkNode> landmarkNodeList; // These should align with order of landmarks in Observation
+    std::vector<LandmarkNode> landmarkNodeList; // These should align with "landmarks" in Observation
 
     std::vector<PPEdge> ppEdges;
     std::vector<PLEdge> plEdges;
     
-    std::vector<double> globalErrors;
+    std::vector<double> globalErrors;   // For performance measurement purposes...
 
     SLAMGraph() {}
 
@@ -186,15 +168,16 @@ struct SLAMGraph {
     inline int getLdmkSVIdx(int idx) { return landmarkNodeList[idx].stateVectorIdx; }
 
     void addPoseNode(Eigen::Vector3d& pose) {
-        // Pose node list is only kept for storage, it should never need to be traversed directly?
+        // Add new pose node to end of list
         int nodeId = poseNodeList.size();
         poseNodeList.push_back(PoseNode(nodeId, pose, stateVector.size())); 
         
         // Append (x,y,theta) to the end of state vector
-        stateVector.conservativeResize(stateVector.size()+3);   // Append (x,y,theta) to the end of state vector
+        stateVector.conservativeResize(stateVector.size()+3);
         stateVector.tail(3) = pose;
     }
     void addPPEdge(Eigen::Vector3d& currentGlobalPose) {
+        // Add an new constraint to a new global pose for the robot 
         // This only gets called once per keyframe (at most)
         ppEdges.push_back(PPEdge(poseNodeList.size()-1, poseNodeList.size(), currentGlobalPose - poseNodeList.back().pose));
         addPoseNode(currentGlobalPose);
@@ -222,7 +205,7 @@ struct SLAMGraph {
     void computeGlobalError() {
         double gErr = 0;
 
-        for (auto& edge : ppEdges) {
+        for (const auto& edge : ppEdges) {
             int iStart = poseNodeList[edge.src].stateVectorIdx, jStart = poseNodeList[edge.dst].stateVectorIdx;
             Eigen::Vector3d xI(stateVector.segment(iStart, 3)), xJ(stateVector.segment(jStart, 3)), eIJ;
             Eigen::Matrix3d XI = v2t(xI), XJ = v2t(xJ), ZIJ = v2t(edge.distance);
@@ -232,16 +215,15 @@ struct SLAMGraph {
             gErr += eIJ.transpose() * edge.info * eIJ;
         }
 
-        for (auto& edge : plEdges) {
+        for (const auto& edge : plEdges) {
             int iStart = poseNodeList[edge.src].stateVectorIdx, jStart = landmarkNodeList[edge.dst].stateVectorIdx;
             Eigen::Vector3d x(stateVector.segment(iStart, 3));
             Eigen::Vector2d l(stateVector.segment(jStart, 2)), eIJ;
-            float s = sin(x(2)), c = cos(x(2));
+            double s = sin(x(2)), c = cos(x(2));
             Eigen::Matrix2d R_transposed {
                 { c, s},
                 {-s, c}
             };
-            // R_transposed << c, s,-s, c;
             eIJ = (R_transposed * (l - x.head(2))) - edge.distance; // 2x1
             gErr += eIJ.transpose() * edge.info * eIJ;
         }
@@ -249,9 +231,9 @@ struct SLAMGraph {
         globalErrors.push_back(gErr);
     }
 
-    void optimizeGraph(std::string myOutputPath) {
+    void optimizeGraph() {
         
-        // Initialize sparse system H and coefficient vector b
+        // Initialize sparse system H and coefficient vector b with zeroes
         Eigen::MatrixXd H = Eigen::MatrixXd::Zero(stateVector.size(), stateVector.size());
         Eigen::VectorXd b = Eigen::VectorXd::Zero(stateVector.size());
         bool isFirstThereforeAddPrior = true;
@@ -263,15 +245,7 @@ struct SLAMGraph {
             auto iSlice = Eigen::seqN(getPoseSVIdx(edge.src), 3), jSlice = Eigen::seqN(getPoseSVIdx(edge.dst), 3);
             Eigen::Vector3d xI(stateVector(iSlice)), xJ(stateVector(jSlice));
 
-            // std::cout << "Pose " << poseNodeList[edge.src].id << " (" << xI.transpose() << ") -> Pose " << poseNodeList[edge.dst].id << " (" << xJ.transpose() << ")\n"; 
-            
-            // std::cout << "Pose " << poseNodeList[edge.src].id << " -> Pose " << poseNodeList[edge.dst].id << ": (" << edge.distance.transpose() << ")\n";
-            
-            // if (isFirstThereforeAddPrior) {
-            //     std::cout << "xI:\n" << xI.transpose() << "\nxJ:\n" << xJ.transpose() << std::endl;
-            // }
-
-            // Use xI, xJ, and dist (aka z) to compute error eIJ and jacobians A,B
+            // Use xI, xJ, and the edge distance (aka zIJ) to compute error eIJ and jacobians A,B
             Eigen::Vector3d eIJ;
             Eigen::Matrix3d A, B;
             { // Math block
@@ -280,52 +254,26 @@ struct SLAMGraph {
 
                 eIJ = t2v(ZIJ_inv * (XI_inv * XJ));
 
-                Eigen::Matrix2d RotXI = XI.block(0,0,2,2), RotZIJ = ZIJ.block(0,0,2,2);
-                Eigen::Vector2d TransXI = xI.head(2), TransXJ = xJ.head(2); // the lazy way
-
-                Eigen::Matrix2d Aii = -RotZIJ.transpose() * RotXI.transpose(), 
+                Eigen::Matrix2d Aii = -ZIJ.block(0,0,2,2).transpose() * XI.block(0,0,2,2).transpose(), 
                 RotXI_derived {
                     { XI(0,1), XI(0,0)},
                     {-XI(0,0), XI(0,1)}
                 };
                 
-                Eigen::Vector2d Aij = (RotZIJ.transpose() * RotXI_derived) * (TransXJ - TransXI), Bij{0,0};
+                Eigen::Vector2d Aij = (ZIJ.block(0,0,2,2).transpose() * RotXI_derived) * (xJ.head(2) - xI.head(2)), Bij{0,0};
                 Eigen::RowVector2d Aji{0,0}, Bji{0,0};
                 
                 A << Aii, Aij,
                      Aji,  -1;
                 B << -Aii, Bij,
                       Bji,   1;
-
-                // NaN checking:
-                // if (XI_inv != XI_inv) {
-                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                //     std::cout << "XI_inv bad\n" << XI_inv << "\nXI is\n" << XI << std::endl;
-                // } else if (ZIJ_inv != ZIJ_inv) {
-                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                //     std::cout << "ZIJ_inv bad\n" << ZIJ_inv << "\nZIJ is\n" << ZIJ << std::endl;
-                // } else if (eIJ != eIJ) {
-                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                //     std::cout << "eIJ bad\n" << eIJ << std::endl;
-                // } else if (A != A) {
-                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                //     std::cout << "A bad\n" << A << std::endl;
-                // } else if (B != B) {
-                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                //     std::cout << "B bad\n" << B << std::endl;
-                // }
             }
-
-            // if (isFirstThereforeAddPrior) {
-            //     std::cout << "eij:\n" << eIJ.transpose() << "\nA:\n" << A << "\nB:\n" << B << std::endl;
-            // }
 
             // Update H and b accordingly
             b(iSlice) += eIJ.transpose() * edge.info * A;
             b(jSlice) += eIJ.transpose() * edge.info * B;
             H(iSlice, iSlice) += A.transpose() * edge.info * A;
             H(iSlice, jSlice) += A.transpose() * edge.info * B;
-            // H(jSlice, iSlice) += B.transpose() * edge.info * A;
             H(jSlice, iSlice) += H(iSlice, jSlice).transpose();
             H(jSlice, jSlice) += B.transpose() * edge.info * B;
 
@@ -333,28 +281,20 @@ struct SLAMGraph {
             // This will fix that node to remain at its current location (fixed reference frame)
             //   all the other measurements are relative to this one
             if (isFirstThereforeAddPrior) {
-                H(iSlice, iSlice) += Eigen::Matrix3d::Identity(); // I think scalar lambda can be applied here too?
+                H(iSlice, iSlice) += Eigen::Matrix3d::Identity(); // I think scalar "lambda" can be applied here too?
                 isFirstThereforeAddPrior = false;
             }
         }
 
-        isFirstThereforeAddPrior = true;
         // Resolve pose-landmark constraints
         for (auto& edge : plEdges) {
+
             // Obtain node states from the state vector
             auto iSlice = Eigen::seqN(getPoseSVIdx(edge.src), 3), jSlice = Eigen::seqN(getLdmkSVIdx(edge.dst), 2);
             Eigen::Vector3d x(stateVector(iSlice));
             Eigen::Vector2d l(stateVector(jSlice));
 
-            // std::cout << "Pose " << poseNodeList[edge.src].id << " (" << x.transpose() << ") -> Landmark " << landmarkNodeList[edge.dst].globalReprIdx << " (" << l.transpose() << ")\n"; 
-            
-            // std::cout << "Pose " << poseNodeList[edge.src].id << " -> Landmark " << landmarkNodeList[edge.dst].globalReprIdx << ": (" << edge.distance.transpose() << ")\n";
-
-            // if (isFirstThereforeAddPrior && poseNodeList[edge.src].id == 1) {
-            //     std::cout << "x:\n" << x.transpose() << "\nl:\n" << l.transpose() << std::endl;
-            // }
-
-            // Use xI, xJ, and dist (aka z) to compute error eIJ and jacobians A,B
+            // Use x, l, and the edge distance (aka zIJ) to compute error eIJ and jacobians A,B
             Eigen::Vector2d eIJ;
             Eigen::Matrix<double, 2, 3> A;
             Eigen::Matrix2d B;
@@ -367,101 +307,34 @@ struct SLAMGraph {
                     {-c, -s}
                 };
                 Eigen::Vector2d TransXIdiff = l - x.head(2), A2 = RotX_derived * TransXIdiff;
-                // if (isFirstThereforeAddPrior && poseNodeList[edge.src].id == 1) {
-                //     std::cout << "B:\n" << B << std::endl;
-                //     std::cout << "TransXIdiff:\n" << TransXIdiff << std::endl;
-                //     std::cout << "z:\n" << edge.distance << std::endl;
-                //     std::cout << "B * TransXIdiff:\n" << B * TransXIdiff << std::endl;
-                //     std::cout << "(B * TransXIdiff) - z:\n" << (B * TransXIdiff) - edge.distance << std::endl;
-                //     Eigen::Vector2d mult = B * TransXIdiff;
-                //     std::cout << "x: " << mult(0) - edge.distance(0) << "\ny: " << mult(1) - edge.distance(1) << std::endl;
-                // }
 
                 eIJ = (B * TransXIdiff) - edge.distance; // 2x1
                 A << -B, A2; // 2x3
-
-                // NaN checking:
-                // if (A != A) {
-                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                //     std::cout << "A bad\n" << A << std::endl;
-                // } else if (B != B) {
-                //     std::cout << "i=" << edge.src << ", j=" << edge.dst << std::endl;
-                //     std::cout << "B bad\n" << B << std::endl;
-                // }
             }
-
-            // if (isFirstThereforeAddPrior && poseNodeList[edge.src].id == 1) {
-            //     std::cout << "eij:\n" << eIJ.transpose() << "\nA:\n" << A << "\nB:\n" << B << std::endl;
-            //     isFirstThereforeAddPrior = false;
-            // }
-            // if (isFirstThereforeAddPrior && poseNodeList[edge.src].id == 1) {
-            //     std::cout << "bislice:\n" << eIJ.transpose() * edge.info * A << std::endl;
-            //     isFirstThereforeAddPrior = false;
-            // }
 
             // Update H and b accordingly
             b(iSlice) += eIJ.transpose() * edge.info * A;
             b(jSlice) += eIJ.transpose() * edge.info * B;
             H(iSlice, iSlice) += A.transpose() * edge.info * A;
             H(iSlice, jSlice) += A.transpose() * edge.info * B;
-            // H(jSlice, iSlice) += B.transpose() * edge.info * A;
             H(jSlice, iSlice) += H(iSlice, jSlice).transpose();
             H(jSlice, jSlice) += B.transpose() * edge.info * B;
         }
 
+
         // Update the state vector; according to the result of the system of equations
-        // stateVector += H.llt().solve(b);
-        // stateVector -= H.llt().solve(b);
-        // stateVector -= H.ldlt().solve(b);
-
-
-        std::ofstream mOut(myOutputPath+"m.txt");
-        mOut << H << std::endl << std::endl << b;
-        mOut.close();
-
-
-        Eigen::VectorXd dx = -H.llt().solve(b), newSV = stateVector + dx;
-        // Eigen::VectorXd dx = -H * b, newSV = stateVector + dx;
-        Eigen::Matrix<double, -1, 3> comb(dx.size(), 3);
-        comb << stateVector, dx, newSV;
-        // std::cout << "Original state vector\t|dx\t\t|New state vector\n" << comb << std::endl;
-
-        std::ofstream vOut(myOutputPath+"v.txt");
-        vOut << comb;
-        vOut.close();
-        
-        stateVector += dx;
-        /* NOTE THE ARCANE KNOWLEDGE OF SOLVING LINEAR SYSTEMS WITH EIGEN 
-
-        // Solve Ax = b. Result stored in x. Matlab: x = A \ b.
-        x = A.ldlt().solve(b));  // A sym. p.s.d.    #include <Eigen/Cholesky>  <-- this version omits sqrt, is it needed?
-        x = A.llt() .solve(b));  // A sym. p.d.      #include <Eigen/Cholesky>
-        x = A.lu()  .solve(b));  // Stable and fast. #include <Eigen/LU>
-        x = A.qr()  .solve(b));  // No pivoting.     #include <Eigen/QR>
-        x = A.svd() .solve(b));  // Stable, slowest. #include <Eigen/SVD>
-        // .ldlt() -> .matrixL() and .matrixD()
-        // .llt()  -> .matrixL()
-        // .lu()   -> .matrixL() and .matrixU()
-        // .qr()   -> .matrixQ() and .matrixR()
-        // .svd()  -> .matrixU(), .singularValues(), and .matrixV()
-        */
+        stateVector -= H.llt().solve(b);
 
         // Copy data from the state vector into graph nodes (for easier access)
-        for (auto& node : poseNodeList) {
-            std::cout << "Pose " << node.id << " old=(" << node.pose.transpose() << "),  new=(" << stateVector.segment(node.stateVectorIdx, 3).transpose() << ")\n"; 
-            node.pose = stateVector.segment(node.stateVectorIdx, 3);
-        }
-        for (auto& node : landmarkNodeList) {
-            std::cout << "Landmark " << node.globalReprIdx << " old=(" << geoHier->landmarks.col(node.globalReprIdx).transpose() << "),  new=(" << stateVector.segment(node.stateVectorIdx, 2).transpose() << ")\n"; 
-            geoHier->landmarks.col(node.globalReprIdx) = stateVector.segment(node.stateVectorIdx, 2);
-        }
+        for (auto& node : poseNodeList) node.pose = stateVector.segment(node.stateVectorIdx, 3);
+        for (auto& node : landmarkNodeList) geoHier->landmarks.col(node.globalReprIdx) = stateVector.segment(node.stateVectorIdx, 2);
     }
 
     void writeGraphToFiles(std::string filePath, std::string fileName) {
         std::ofstream nodesOut(filePath+"/graph_nodes/"+fileName), edgesOut(filePath+"/graph_edges/"+fileName), errOut(filePath+"/!gError.txt");
         
-        // Output Nodes        // TODO test if pn.pose.transpose() is easily readible in python
-        for (const auto& pn : poseNodeList) nodesOut << "P" << pn.id << " " << pn.pose(0) << " " << pn.pose(1) << " " << pn.pose(2) << std::endl;
+        // Output Nodes
+        for (const auto& pn : poseNodeList) nodesOut << "P" << pn.id << " " << pn.pose.transpose() << std::endl;
         for (const auto& ln : landmarkNodeList) nodesOut << "L" << ln.globalReprIdx << " " << geoHier->landmarks.col(ln.globalReprIdx).transpose() << std::endl;
 
         // Output Edges
@@ -558,11 +431,11 @@ struct SLAMGraph {
 
 SLAMGraph g;
 Eigen::Vector3d mostRecentGlobalPose; // if not tracking updates to all previous robot poses
-bool isDebug = false;
+bool isDebug = false, isOutput = false;
 std::string outputPath;
 
 void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
-    std::cout << "Received keyframe " << cloudMsg->header.seq << std::endl;
+    if (isDebug) std::cout << "Received keyframe " << cloudMsg->header.seq << std::endl;
 
     // Take the points from the PointCloud2 message and create a geometric hierarchy from it
     pcl::PointCloud<pcl::PointXY> localCloud;
@@ -572,12 +445,14 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     for (const auto& p : localCloud) vectorOfTrees.col(idx++) = PtLoc{p.x, p.y};
     urquhart::Observation localObs(vectorOfTrees);
     
-    std::cout << "Defined local observation for keyframe " << cloudMsg->header.seq << std::endl;
-    writeHierarchyFiles(localObs, outputPath+"/local", std::to_string(g.poseNodeList.size()+1)+".txt");
-
-    std::ofstream ptsOut(outputPath+"/local/pts/"+std::to_string(g.poseNodeList.size()+1)+".txt");
-    for(const auto& c : localObs.landmarks.colwise()) ptsOut << c(0) << " " << c(1) << std::endl;
-    ptsOut.close();
+    // Save local observation data (if desired)
+    if (isDebug) std::cout << "Defined local observation for keyframe " << cloudMsg->header.seq << std::endl;
+    if (isOutput) {
+        writeHierarchyFiles(localObs, outputPath+"/local", std::to_string(g.poseNodeList.size()+1)+".txt");
+        std::ofstream ptsOut(outputPath+"/local/pts/"+std::to_string(g.poseNodeList.size()+1)+".txt");
+        for (const auto& c : localObs.landmarks.colwise()) ptsOut << c(0) << " " << c(1) << std::endl;
+        ptsOut.close();
+    }
 
     // Do different things depending on whether the global map is available
     if (g.geoHier == NULL) {
@@ -598,28 +473,39 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             g.addPLEdge(lIdx, position);
         }
 
-        std::cout << "Constructed initial global geometric hierarchy " << cloudMsg->header.seq << std::endl;
-        std::cout << "Initial tree positions:\n" << localObs.landmarks.transpose() << std::endl;
+        if (isDebug) {
+            std::cout << "Constructed initial global geometric hierarchy " << cloudMsg->header.seq << std::endl;
+            std::cout << "Initial tree positions:\n" << localObs.landmarks.transpose() << std::endl;
+        }
 
         // Do nothing else because we need to get more observations before optimizing
 
     } else {
 
-        // auto matchingPoints = matching::hierarchyMatching(localObs, *g.geoHier, 5);
-        // auto matchingPoints = matchObs(localObs, *g.geoHier, 5, 1.5); // TODO use last param for association pruning
+        // Attempt to match the current local observation with the global representation
+        int matchingThresh = 5;
+        std::vector<std::pair<Eigen::Index, Eigen::Index>> matchingPointIndices;
+        do {
+            matchingPointIndices = matching::hierarchyIndexMatching(localObs, *g.geoHier, matchingThresh);
+            if (isDebug) std::cout << "Matched " << matchingPointIndices.size() << " points with the global frame using threshold=" << matchingThresh << std::endl;
+            matchingThresh += 2;
+        } while (matchingPointIndices.size() < 2);
 
-        // When global map is present:
-        auto matchingPointIndices = matching::hierarchyIndexMatching(localObs, *g.geoHier, 5);
-        std::cout << "Obtained " << matchingPointIndices.size() << " point matches with the global frame." << std::endl;
 
         // LOG MATCHES
-        std::ofstream matOut(outputPath+"/match/"+std::to_string(g.poseNodeList.size())+".txt");
-        for (const auto& [lIdx, gIdx] : matchingPointIndices) {
-            matOut << localObs.ldmkX(lIdx) << "," << localObs.ldmkY(lIdx) << "|";
-            matOut << g.geoHier->ldmkX(gIdx) << "," << g.geoHier->ldmkY(gIdx) << std::endl;
-            // std::cout << std::sqrt((localObs.landmarks.col(lIdx) - g.geoHier->landmarks.col(gIdx)).array().square().sum()) << std::endl;
+        if (isOutput) {
+            std::ofstream matOut(outputPath+"/match/"+std::to_string(g.poseNodeList.size())+".txt");
+            for (const auto& [lIdx, gIdx] : matchingPointIndices) {
+                matOut << localObs.ldmkX(lIdx) << "," << localObs.ldmkY(lIdx) << "|";
+                matOut << g.geoHier->ldmkX(gIdx) << "," << g.geoHier->ldmkY(gIdx) << std::endl;
+                std::cout << std::sqrt((localObs.landmarks.col(lIdx) - g.geoHier->landmarks.col(gIdx)).array().square().sum()) << std::endl;
+            }
+            matOut.close();
         }
-        matOut.close();
+        if (isDebug) {
+            for (const auto& [lIdx, gIdx] : matchingPointIndices) 
+                std::cout << euclideanDistance2D(localObs.landmarks.col(lIdx), g.geoHier->landmarks.col(gIdx)) << std::endl;
+        }
 
 
 
@@ -642,25 +528,24 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Use the inlier point pairs to find the robot's current position wrt global frame
         Eigen::Matrix4d currentGlobalRobotPoseTf(computeRigid2DEuclidTf(localObs.landmarks, g.geoHier->landmarks, matchingPointIndices));
-        std::cout << "Calculated tf (local->global):\n" << currentGlobalRobotPoseTf << std::endl;
+        if (isDebug) std::cout << "Calculated tf (local->global):\n" << currentGlobalRobotPoseTf << std::endl;
 
         // Define a new node and edge for the robot's estimated odometry
-        // Keep the reference to the current PoseNode to use when creating landmark constraints
         Eigen::Vector3d robotPoseInGlobal{currentGlobalRobotPoseTf(0,3), 
                                             currentGlobalRobotPoseTf(1,3), 
                                             atan2(currentGlobalRobotPoseTf(1,0), currentGlobalRobotPoseTf(0,0))};
         g.addPPEdge(robotPoseInGlobal);
-        std::cout << "New robot global pose: " << robotPoseInGlobal.transpose() << std::endl;
+        if (isDebug) std::cout << "New robot global pose: " << robotPoseInGlobal.transpose() << std::endl;
 
         // Add constraints for all local points that matched with existing landmarks
-        std::unordered_set<Eigen::Index> localMatchedPointIndices;
+        std::unordered_set<Eigen::Index> localMatchedPointIndices, globalMatchedPointIndices;
         for (const auto& [lIdx, gIdx] : matchingPointIndices) {
             PtLoc localPosition = localObs.landmarks.col(lIdx);
             g.addPLEdge(gIdx, localPosition); // TODO for some reason, compiler not coercing slice into PtLoc?
             localMatchedPointIndices.insert(lIdx);
-            // std::cout << "L: " << localObs.landmarks.col(lIdx).transpose() << ", G: " << g.geoHier->landmarks.col(gIdx) << std::endl;
+            globalMatchedPointIndices.insert(gIdx);
+            if (isDebug) std::cout << "Matched: L=" << lIdx << " -> G=" << gIdx << std::endl;
         }
-        std::cout << "Added constraints to existing landmarks." << std::endl;
 
         // Try to associate other local points in the global frame  
         bool hasNewLandmarks = false;
@@ -677,25 +562,22 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                 };
                 
                 // Obtain this point's observed position relative to the global frame
-                Eigen::Matrix4d globalLandmarkPosition = currentGlobalRobotPoseTf * localPointTf;
-                double nearestPointX = 0.75, nearestPointY = 0.75;  // meters
+                PtLoc globalXY{(currentGlobalRobotPoseTf * localPointTf)(Eigen::seq(0,1), 3)};
+                double nearestSqDistToPoint = 1.125;  // meters
 
-                // Find the nearest existing landmark below the nearness threshold for the given point in the global frame
+                // Find the nearest existing landmark below the nearness threshold for this given point
                 int nearestPointId = -1;
                 for (int gIdx = 0; gIdx < g.geoHier->landmarks.cols(); ++gIdx) {
-                    double diffX = std::abs(globalLandmarkPosition(0,3) - g.geoHier->landmarks(0, gIdx)), 
-                            diffY = std::abs(globalLandmarkPosition(1,3) - g.geoHier->landmarks(1, gIdx));
-                    // TODO make this more robust
-                    if (diffX < nearestPointX && diffY < nearestPointY) {
-                        nearestPointX = diffX, nearestPointY = diffY, nearestPointId = gIdx;
-                        std::cout << "Matching local tree with landmark " << nearestPointId << std::endl;
+                    if (globalMatchedPointIndices.find(gIdx) == globalMatchedPointIndices.end()) {
+                        // TODO make this more robust
+                        double sqDiff = squaredDistance2D(globalXY, g.geoHier->landmarks.col(gIdx));
+                        if (sqDiff < nearestSqDistToPoint) nearestSqDistToPoint = sqDiff, nearestPointId = gIdx;
                     }
                 }
-                // TODO maybe use the poincloud clustering/centroid stuff here too
+                // TODO maybe use the pointcloud clustering/centroid stuff here too
 
                 // If we didn't find a point close enough to this one, make a node for it
                 if (nearestPointId == -1) {
-                    PtLoc globalXY{globalLandmarkPosition(Eigen::seq(0,1), 3)};
                     hasNewLandmarks = true;
 
                     // Add the point to the set of landmarks in the global geometric hierarcy
@@ -705,22 +587,24 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
                     // Define a graph node for this point and add it to the statevector
                     g.addLandmarkNode(nearestPointId, globalXY);
-                    std::cout << "NEW LANDMARK: " << globalXY.transpose() << std::endl;
+                    if (isDebug) std::cout << "NEW LANDMARK: " << globalXY.transpose() << std::endl;
                 }
 
                 // Create a constraint for this landmark
                 PtLoc localPosition = localObs.landmarks.col(lIdx);
                 g.addPLEdge(nearestPointId, localPosition); // TODO for some reason, compiler not coercing slice into PtLoc?
+                if (isDebug) std::cout << "Matched: L=" << lIdx << " -> G=" << nearestPointId << std::endl;
             }
         }
 
 
         // Optimize the graph once
-        std::cout << "Optimizing graph... ";
-        g.optimizeGraph(outputPath+"/HB/"+std::to_string(cloudMsg->header.seq));
-        std::cout << "   Done!" << std::endl;
+        if (isDebug) std::cout << "Optimizing graph... ";
+        g.optimizeGraph();
+        if (isDebug) std::cout << "   Done!" << std::endl;
 
-        std::cout << "Optimized tree positions:\n" << g.geoHier->landmarks.transpose() << std::endl;
+        // TODO add verbose debug option
+        // if (isDebug) std::cout << "Optimized tree positions:\n" << g.geoHier->landmarks.transpose() << std::endl;
 
         
 
@@ -729,12 +613,11 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // else g.geoHier->recomputeEdgeLengths();
 
         if (hasNewLandmarks) {
-            std::cout << "Recomputing hierarchy." << std::endl;
+            if (isDebug) std::cout << "Recomputing hierarchy." << std::endl;
             g.geoHier->computeHierarchy();
         } else {
-            std::cout << "Recomputing edge lengths." << std::endl;
+            if (isDebug) std::cout << "Recomputing edge lengths." << std::endl;
             g.geoHier->recomputeEdgeLengths();
-            // std::cout << "New edge lengths:\n" << g.geoHier->triangulationEdgeLengths << std::endl;
         }
         
         
@@ -765,7 +648,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     }
 
     // Print the graph to a file (for debugging)
-    if (isDebug) {
+    if (isOutput) {
         std::cout << "Logging global data... ";
         writeHierarchyFiles(*g.geoHier, outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
         std::cout << "   Done!" << std::endl;
@@ -784,11 +667,12 @@ int main(int argc, char **argv) {
 
     std::string absolutePackagePath = ros::package::getPath("urquhart");
     isDebug = n.param("debug", true);
+    isOutput = n.param("output", true);
     n.param<std::string>("outputDirName", outputPath, "gTEST");
 
 
-    if (isDebug) {
-        std::cout << "Created output directory: '" << outputPath << "' ... ";
+    if (isOutput) {
+        std::cout << "Creating output directory: '" << outputPath << "' ... ";
         outputPath = absolutePackagePath+"/output/"+outputPath;
         std::filesystem::remove_all(outputPath);
         std::filesystem::create_directory(outputPath);
@@ -806,15 +690,12 @@ int main(int argc, char **argv) {
         std::filesystem::create_directory(outputPath+"/local/h");
         std::filesystem::create_directory(outputPath+"/local/pts");
         std::filesystem::create_directory(outputPath+"/match");
-        std::filesystem::create_directory(outputPath+"/HB");
         std::cout << "   Done!" << std::endl;
     }
 
-    // SimConfig cfg(n);
-    // cfg.outputConfig(std::cout);
     // ros::Rate pub_rate(cfg.pubRate);    // 10Hz by default
 
-    // pcl::PointCloud<pcl::PointXY> localPC;
+    
     ros::Subscriber sub = n.subscribe("/keyframe_maker/keyframe", 10, constructGraph);
 
     ros::spin();
