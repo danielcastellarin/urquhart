@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <launch>
     <rosparam file="$(find urquhart)/run_configs/sim_path/obs_range_testing.yaml" command="load" />
+    <!-- <rosparam file="$(find urquhart)/run_configs/sim_path/big_obs_range_test.yaml" command="load" /> -->
     <node pkg="urquhart" type="ObsRanger" name="obs_ranger" output="screen" />
 </launch>

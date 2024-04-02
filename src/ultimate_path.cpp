@@ -12,7 +12,6 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-// #include <pcl/filters/voxel_grid.h>
 
 #include <sensor_msgs/PointCloud2.h>
 #include <geometry_msgs/Pose2D.h>
@@ -159,9 +158,6 @@ int main(int argc, char **argv)
     std::filesystem::create_directory(cfg.localPointsPath);
     std::cout << "Created output directory: " << cfg.outputDirName << "\n";
     
-    // std::ofstream configOut(cfg.outputDirPath+"/!config.txt");
-    // cfg.outputConfig(configOut);
-    // configOut.close();
 
     // Find a starting location and observe the environment
     if (robotPath->validateStartingPose()) {

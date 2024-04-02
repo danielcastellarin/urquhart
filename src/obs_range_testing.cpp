@@ -1,6 +1,6 @@
-#include <obs_range_help.hpp>
-#include <observation.hpp>
+// #include <obs_range_help.hpp>
 #include <matching.hpp>
+#include <logging.hpp>
 #include <memory>
 #include <random>
 #include <unordered_map>
@@ -10,114 +10,154 @@
 #include <algorithm>
 #include <iostream>
 #include <filesystem>
+#include <fstream>
+
+#include <ros/ros.h>
+#include <ros/package.h>
+
+struct SimConfig
+{
+    std::string absolutePackagePath, outputDirPath, polygonsPath, polyPolyPath, polyTriPath, polyHierPath, polyDescPath, 
+        localPointsPath, 
+        matchesPath, matchPolyPath, matchTriPath, matchPointsPath;
+    // Required Parameters
+    std::vector<Tree> forest;
+    std::string forestFile;
+    std::vector<int> obsRanges;
+    double collisionRadius, 
+    // Optional Parameters
+    successfulObservationProbability, treePositionStandardDeviation, treeRadiusStandardDeviation;
+    int initializationAttempts, randomSeed;
+    bool givenStartPose = false;
+    Pose initialPose;
+    std::string outputDirName;
+
+    // Each config file is designed to be a static run config
+    SimConfig(const ros::NodeHandle &nh) {
+
+        absolutePackagePath = ros::package::getPath("urquhart") + "/";
+
+        // Required parameters
+        nh.param<std::string>("forestFile", forestFile, "coolForest.txt");
+        forest = readForestFile(absolutePackagePath + forestFile);
+        obsRanges = nh.param("observationRanges", std::vector<int>{10,20,40,80});   // Note "Radius" and "Range"! (naming changes from paramter to code)
+        collisionRadius = nh.param("collisionRadius", 0.3);
+
+        // Optional parameters
+        successfulObservationProbability = nh.param("successfulObservationProbability", 1);
+        treePositionStandardDeviation = nh.param("treePositionStandardDeviation", 0);
+        treeRadiusStandardDeviation = nh.param("treeRadiusStandardDeviation", 0);
+        if (nh.hasParam("startPoseX") && nh.hasParam("startPoseY") && nh.hasParam("startPoseTheta")) {
+            double x, y, theta;
+            nh.getParam("startPoseX", x), nh.getParam("startPoseY", y), nh.getParam("startPoseTheta", theta);
+            initialPose = Pose(x, y, theta);
+            givenStartPose = true;
+        }
+        initializationAttempts = nh.param("initializationAttempts", 10000);
+        randomSeed = nh.param("randomSeed", -1);
+        nh.param<std::string>("outputDirName", outputDirName, "testOutput");
+
+        outputDirPath = absolutePackagePath+"output/"+outputDirName;
+        localPointsPath = outputDirPath+"/local_obs/";
+
+        polygonsPath = outputDirPath+"/poly/";
+        polyPolyPath = polygonsPath+"p/";
+        polyTriPath = polygonsPath+"t/";
+        polyHierPath = polygonsPath+"h/";
+        polyDescPath = polygonsPath+"d/";
+
+        matchesPath = outputDirPath+"/match/";
+        matchPolyPath = matchesPath+"polygonIDs/";
+        matchTriPath = matchesPath+"triangleIDs/";
+        matchPointsPath = matchesPath+"points/";
+    }
+    void outputConfig(std::ostream& out) { 
+        out << "Forest file used: " << forestFile << std::endl;
+        out << "Observation ranges: "; for (auto i: obsRanges) out << i << " ";
+        out << std::endl << "Collision width: " << collisionRadius << std::endl;
+        out << "Detection noise: " << successfulObservationProbability << std::endl;
+        out << "Position noise: " << treePositionStandardDeviation << std::endl;
+        out << "Tree radius noise: " << treeRadiusStandardDeviation << std::endl;
+        out << "Maximum initialization attempts: " << initializationAttempts << std::endl;
+        out << "Random seed: " << (randomSeed >= 0 ? std::to_string(randomSeed) : "None") << std::endl;
+        out << "Starting pose input: " << (givenStartPose ? initialPose.printPose() : "None") << std::endl;
+    }
+};
+
+struct Obs {
+    int obsRange;
+    Pose globalPose;
+    std::vector<Tree> treePositions;
+    Obs(int r, Pose pose) : obsRange(r), globalPose(pose) {}
+};
+
+
+class Robot {
+    bool givenInitialPose;
+    int initAttempts;
+    std::vector<int> myObsRanges, myObsRangesSq;
+
+    double successfulObservationProbability;
+    double treePositionStandardDeviation;
+    double treeRadiusStandardDeviation;
+
+    std::random_device randomDevice;
+    std::mt19937 rng;
+    std::uniform_real_distribution<double> randX;
+    std::uniform_real_distribution<double> randY;
+    std::uniform_real_distribution<double> randTheta;
+    std::uniform_real_distribution<double> detectionNoise;
+    std::normal_distribution<double> positionNoise, treeRadiusNoise;
+
+    // Assume an observation occurs every second
+    // linear+angular velocity (magnitude and direction) will depend on path type
+    // distBetweenObs can be repurposed for rotating at corners of routes
+
+    public:
+        std::vector<Tree> env;
+        float collisionWidth;
+        Pose globalPose;
+        int currentObsIdx = 0;
+
+        Robot(SimConfig cfg);
+        Point findValidPoint();
+        bool validateStartingPose();
+        Obs observe();
+
+        // default detection noise simply is a percentage chance asking "is tree detected?"
+        // Potential improvement: detection noise can be proportional to gaussian (tree less likely to be seen further away from obs)
+};
+
 
 // IO stuff
 
-void writeObservationToFile(std::string filePath, const std::vector<Tree>& trees) {
-    std::ofstream out(filePath+".txt");
-    for (const Tree& t : trees) out << t.toString() << std::endl;
-    out.close();
-}
-
-void writeHierarchyToFile(SimConfig cfg, const urquhart::Observation& trees, std::string fileName) {
+void writeHierarchyFiles(SimConfig cfg, const urquhart::Observation& trees, std::string fileName) {
     std::ofstream plyOut(cfg.polyPolyPath+fileName), triOut(cfg.polyTriPath+fileName), 
                     hieOut(cfg.polyHierPath+fileName), dscOut(cfg.polyDescPath+fileName);
-    write_graphviz(hieOut, trees.H->graph);
-    hieOut.close();
     
-    // Iterate over the indices of the Polygons in the hierarchy
-    for(auto pIdx : trees.H->get_children(trees.H->root)) {
-        for(auto ch : trees.H->graph[pIdx].points) plyOut << pIdx << " " << ch[0] << " " << ch[1] << "|";
-        plyOut << std::endl;
-        for(auto d : trees.H->graph[pIdx].descriptor) dscOut << d << " ";
-        dscOut << std::endl;
-        
-        // Iterate over the indices of the Triangles that compose this Polygon
-        for(auto tIdx : trees.H->traverse(pIdx)) {
-            // Retain only the Polygon objects that have three sides
-            if (trees.H->graph[tIdx].points.size() == 3) {
-                for(auto ch : trees.H->graph[tIdx].points) triOut << tIdx << " " << ch[0] << " " << ch[1] << "|";
-                triOut << std::endl;
-            }
-        }
-    }
+    logging::writeHierarchyToFile(trees, plyOut, triOut, hieOut, dscOut);
+    
+    hieOut.close();
     plyOut.close();
     triOut.close();
     dscOut.close();
 }
 
-// Substituted for original for type compatibility with my code
-void myPolygonMatching(
-    const urquhart::Observation &ref, std::vector<size_t> refIds,
-    const urquhart::Observation &targ, std::vector<size_t> targIds, double thresh,
-    std::vector<std::pair<size_t, size_t>> &polygonMatches) {
-    std::set<size_t> matched;
-    for (auto rIdx : refIds) {
-        size_t bestMatch = 0, bestDist = 100000;
-        urquhart::Polygon rp = ref.H->get_vertex(rIdx);
-        for (auto tIdx : targIds) {
-            urquhart::Polygon tp = targ.H->get_vertex(tIdx);
-            // if tIdx was not matched before and the difference of number of points is not larger than 5
-            if (matched.find(tIdx) == matched.end() &&
-                std::abs(int(rp.points.size() - tp.points.size())) <= 3)
-            {
-                double d = euclideanDistance(rp.descriptor, tp.descriptor);
-                if (d < bestDist) {
-                    bestDist = d;
-                    bestMatch = tIdx;
-                }
-            }
-        }
-
-        if (bestDist < thresh) {
-            matched.insert(bestMatch);
-            polygonMatches.push_back({rIdx, bestMatch});
-        }
-    }
-}
-
 void matchObs(const urquhart::Observation &ref, const urquhart::Observation &targ, double polyMatchThresh, double validPointMatchThresh,
-            std::vector<std::pair<size_t, size_t>> &polygonMatches, std::vector<std::pair<size_t, size_t>> &triangleMatches, std::vector<std::pair<vecPtT, vecPtT>> &vertexMatches) {
+            std::vector<std::pair<size_t, size_t>> &polygonMatches, std::vector<std::pair<size_t, size_t>> &triangleMatches, std::vector<std::pair<PtLoc, PtLoc>> &vertexMatches) {
 
     // Polygon Matching (Level 2)
-    // std::vector<size_t> refIds = ref.H->get_children(0), targIds = targ.H->get_children(0);
-    // matching::polygonMatching(ref, ref.H->get_children(0), targ, targ.H->get_children(0), thresh, polygonMatches);
-    myPolygonMatching(ref, ref.H->get_children(0), targ, targ.H->get_children(0), polyMatchThresh, polygonMatches);
+    matching::polygonMatching(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), polyMatchThresh, polygonMatches);
 
     // Triangle Matching (Level 1)
     for (auto pMatch : polygonMatches) {
-        // refIds = ref.H->get_children(pMatch.first), targIds = targ.H->get_children(pMatch.second);
         // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-        // matching::polygonMatching(ref, ref.H->get_children(pMatch.first), targ, targ.H->get_children(pMatch.second), thresh, triangleMatches);
-        myPolygonMatching(ref, ref.H->get_children(pMatch.first), targ, targ.H->get_children(pMatch.second), polyMatchThresh, triangleMatches);
+        matching::polygonMatching(ref, ref.hier->getChildrenIds(pMatch.first), targ, targ.hier->getChildrenIds(pMatch.second), polyMatchThresh, triangleMatches);
     }
 
     // Vertex Matching (Level 0)
-    std::set<size_t> uniqueMatches;
-    for (auto tMatch : triangleMatches) {   // FIXME? make the loop explicitly over constant references?
-        urquhart::Polygon refTriangle = ref.H->get_vertex(tMatch.first), targTriangle = targ.H->get_vertex(tMatch.second);
-        std::vector<size_t> chi = {0, 1, 2}, bestPermutation;
-
-        // TODO change the edgeLengths to do squared distance instead of euclidean distance (unnecessary square root)
-
-        // Permute the edges to find the best match between the triangles
-        double bestDist = 1000000;
-        do {
-            double d = euclideanDistance(refTriangle.edgeLengths, std::vector<double>{targTriangle.edgeLengths[chi[0]], targTriangle.edgeLengths[chi[1]], targTriangle.edgeLengths[chi[2]]});
-            if (d < bestDist) {
-                bestDist = d;
-                bestPermutation = chi;
-            }
-        } while (std::next_permutation(chi.begin(), chi.end()));
-
-        for (size_t i = 0; i < 3; ++i) {
-            int refIdx = (i+2)%3, targIdx = (bestPermutation[i]+2)%3;
-            size_t uid = cantorPairing(refTriangle.edges[refIdx].first, targTriangle.edges[targIdx].first);
-            if (uniqueMatches.find(uid) == uniqueMatches.end()) {
-                vertexMatches.push_back({refTriangle.points[refIdx], targTriangle.points[targIdx]});
-                uniqueMatches.insert(uid);
-            }
-        }
+    for (const auto& [refIdx, targIdx] : matching::pointIndexMatching(ref, targ, triangleMatches)) {
+        vertexMatches.push_back({ref.landmarks.col(refIdx), targ.landmarks.col(targIdx)});
     }
 }
 
@@ -203,9 +243,10 @@ int main(int argc, char* argv[]) {
         ros::init(argc, argv, "obs_ranger");
         ros::NodeHandle n("~");
         SimConfig cfg(n);
-        cfg.outputConfig(std::cout);
+        std::cout << "bing bong" << std::endl;
+        // cfg.outputConfig(std::cout);
         int numObs = cfg.obsRanges.size();
-        std::cout << "Observation count: " << cfg.obsRanges.size() << std::endl;
+        // std::cout << "Observation count: " << cfg.obsRanges.size() << std::endl;
         ros::Rate pub_rate(100);
 
         // Initialize the path through the forest 
@@ -235,7 +276,7 @@ int main(int argc, char* argv[]) {
         if (r.validateStartingPose()) {
             std::cout << "Robot observe trees from stationary pose (x y theta): " << r.globalPose.printPose() << std::endl << std::endl;
 
-            // Also save this run's configuration
+            // // Also save this run's configuration
             std::ofstream configOut(cfg.outputDirPath+"/!config.txt");
             cfg.givenStartPose = true;  // hack
             cfg.initialPose = r.globalPose;
@@ -248,21 +289,22 @@ int main(int argc, char* argv[]) {
                 std::cout << ++r.currentObsIdx << ": Observed environment at sensor range " << nextObs.obsRange << std::endl;
 
                 // Define geometric hierarchy
-                PointVector vectorOfTrees;
-                for (const auto& t : nextObs.treePositions) vectorOfTrees.push_back(std::vector<double>{t.p.x, t.p.y});
-                myObs = new urquhart::Observation(vectorOfTrees);
+                Points treeXYs(2, nextObs.treePositions.size());
+                int idx = 0;
+                for (const auto& t : nextObs.treePositions) treeXYs.col(idx++) = PtLoc{t.p.x, t.p.y};
+                myObs = new urquhart::Observation(treeXYs);
 
                 // Save hierarchy data to files
-                writeObservationToFile(cfg.localPointsPath+std::to_string(nextObs.obsRange), nextObs.treePositions);
+                logging::writeObservationToFile(cfg.localPointsPath+std::to_string(nextObs.obsRange), nextObs.treePositions);
                 std::cout << r.currentObsIdx << ": Written observation to file" << std::endl;
-                writeHierarchyToFile(cfg, *myObs, std::to_string(nextObs.obsRange)+".txt");
+                // writeHierarchyFiles(cfg, *myObs, std::to_string(nextObs.obsRange)+".txt");
                 std::cout << r.currentObsIdx << ": Written geometric hierarchy to file" << std::endl;
 
                 // Try matching previous observations with this one, save the output in files 
                 auto rIter = myRanges.begin();
                 for (auto ghIter = geoHiers.begin(); ghIter != geoHiers.end(); ++rIter, ++ghIter) {
                     std::vector<std::pair<size_t, size_t>> pM, tM;
-                    std::vector<std::pair<vecPtT, vecPtT>> ptM;
+                    std::vector<std::pair<PtLoc, PtLoc>> ptM;
                     std::cout << r.currentObsIdx << ": Attempting to match observations at range " << *rIter << " with the one at " << nextObs.obsRange << std::endl;
                     matchObs(**ghIter, *myObs, 5, 5, pM, tM, ptM);
                     std::string mapKey = std::to_string(*rIter) +"-"+ std::to_string(nextObs.obsRange)+".txt";

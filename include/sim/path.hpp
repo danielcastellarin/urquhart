@@ -8,26 +8,6 @@
 #include <unordered_set>
 #include <map>
 #include <algorithm>
-#include <fstream>
-
-std::vector<Tree> readForestFile(std::string path) {
-    // Assume each line in the file describes a point in 2D (space-separated)
-    std::vector<Tree> forest;
-    std::ifstream infile(path);
-    double xPosition,yPosition,radius;
-
-    std::string line;
-    while (std::getline(infile, line))
-    {
-        std::istringstream iss(line);
-        if (iss >> xPosition >> yPosition >> radius) { // only collect the tree data
-            forest.push_back(Tree(xPosition, yPosition, radius));
-        }
-    }
-
-    infile.close();
-    return forest;
-}
 
 struct SimConfig
 {

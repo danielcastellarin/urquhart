@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fstream>
 #include <iostream>
 #include <vector>
 #include <algorithm>
@@ -7,41 +8,53 @@
 #include <tuple>
 #include <utility>
 #include <math.h>
+#include <memory>
+#include <random>
+#include <unordered_map>
+#include <queue>
+#include <unordered_set>
+#include <set>
+#include <map>
+#include <filesystem>
+#include <eigen3/Eigen/Dense> // References new version of Eigen (3.4.90)
 
-using vecPtT = std::vector<double>;
-using EdgeT = std::pair<int, int>;
-using PointVector = std::vector<vecPtT>;
+using EdgeSet = Eigen::Matrix2Xi;
+using Points = Eigen::Matrix2Xd;
+using PtLoc = Eigen::Vector2d;
 
-inline float pow_2(const float &x) { return x * x; }
+// Alternative method for vector distance?
+// Eigen::VectorXd diff = A - B;
+// return diff.transpose().dot(diff);
 
-inline double euclideanDistance(std::vector<double> A, std::vector<double> B)
-{
-  double d = 0;
-  for (size_t i = 0; i < A.size(); ++i)
-  {
-    d += pow_2(A[i] - B[i]);
-  }
-  // return std::sqrt(d);
-  return d;
+inline double descriptorDistance(const Eigen::VectorXd& A, const Eigen::VectorXd& B) {
+  return std::sqrt((A - B).array().square().sum());
 }
 
-inline double euclideanDistance2D(std::vector<double> A, std::vector<double> B)
-{
-  double d = 0;
-  for (size_t i = 0; i < 2; ++i)
-  {
-    d += pow_2(A[i] - B[i]);
-  }
-  // return std::sqrt(d);
-  return d;
+inline double descriptorDistanceAgain(const Eigen::VectorXd& A, Eigen::VectorXd B) {
+  return std::sqrt((A - B).array().square().sum());
 }
 
-inline size_t cantorPairing(size_t a, size_t b)
-{
+// EuclideanDistance2D is used for polygon descriptor definition
+inline double euclideanDistance2D(const PtLoc& A, const PtLoc& B) {
+  return std::sqrt((A - B).array().square().sum());
+}
+
+inline double squaredDistance2D(const PtLoc& A, const PtLoc& B) {
+  return (A - B).array().square().sum();
+}
+
+// Get the squared distance of every sampled point to a centroid
+inline Eigen::VectorXd centroidDistance(const Points& samples, const Eigen::Vector2d& centroid) {
+  Points centroidMatrix(2, samples.cols());
+  centroidMatrix.colwise() = centroid;
+  return (centroidMatrix - samples).array().square().colwise().sum().sqrt();
+}
+
+
+inline size_t cantorPairing(size_t a, size_t b) {
   // a is always the smallest number
   size_t aux = a;
-  if(b < a)
-  {
+  if (b < a) {
     a = b;
     b = aux;
   }

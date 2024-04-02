@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+    <rosparam file="$(find urquhart)/run_configs/sim_path/obsRadPath.yaml" command="load" />
+    <node pkg="urquhart" type="ultimate_path" name="sim_path" output="screen" />
+    <node pkg="urquhart" type="KeyframeGen" name="keyframe_maker" output="screen" />
+    <rosparam file="$(find urquhart)/run_configs/geoSLAM/std.yaml" command="load" />
+    <node pkg="urquhart" type="PolygonSLAM" name="graph_builder" output="screen" />
+</launch>

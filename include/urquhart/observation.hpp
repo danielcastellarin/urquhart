@@ -1,9 +1,6 @@
 #pragma once
 
-#include <distance.hpp>
-#include <polygon.hpp>
-#include <tree.hpp>
-#include <map>
+#include <hierarchy.hpp>
 
 #include "libqhullcpp/RboxPoints.h"
 #include "libqhullcpp/QhullError.h"
@@ -20,25 +17,52 @@
 namespace urquhart {
     class Observation {
         public:
-            explicit Observation(PointVector& landmarks);
+            explicit Observation(Points& freshLandmarks);
+            explicit Observation(std::vector<std::vector<double>>& freshLandmarks);
+            ~Observation();
             void view();
+
+            void computeHierarchy();
+            void recomputeEdgeLengths();
+
+            // Storage for the positions of all landmarks in this observation (one per column)
+            // All polygons store references to these values
+            Points landmarks;
+
+            // Storage for each distinct edge in the Delaunay triangulation of this observation
+            // Each column is a pair of column numbers in "landmarks" 
+            EdgeSet triangulationEdges;
+            Eigen::VectorXd triangulationEdgeLengths; // indices should match triangulationEdges
+            
+            // cantor pair of vertex IDs -> EdgeSet column ID (which contains the "landmarks" indices for the two points in this edge)
+            // useful when preventing duplicate operations on 
+            std::unordered_map<size_t, int> edgeRefMap;
+
             // H stores all polygons in a tree structure, where each vertex represents a polygon.
             // The childs of a polygon are the triangles that were merged to compose it.
             // Triangles are the leaves of the tree.
             // The vertex 0 (root) is an empty polygon that is only used to connect all polygons
-            // TODO: H should be private and have accessors
-            Tree* H;
+            // TODO: hier should be private and have accessors
+            Hierarchy* hier = NULL;
+            // std::shared_ptr<Hierarchy> hier;
+
+            const PtLoc& ldmk(Eigen::Index colNum) const;
+            const double& ldmkX(Eigen::Index colNum) const;
+            const double& ldmkY(Eigen::Index colNum) const;
+            const Points& ldmks(Eigen::VectorXi indices) const;
+
         private:
-            PointVector landmarks;
             // Computes a Delaunay triangulation using QHull from a set of landmarks.
-            void delaunayTriangulation_(PointVector& points, std::vector<Polygon>& polygons);
-            // Uses the triangles of the delaunay triangulation to compute an urquhart tessellation
-            void urquhartTesselation_();
+            void delaunayTriangulationFromScratch(std::vector<Polygon>& polygons);
             
-            std::vector<EdgeT>::iterator findEdge_(Polygon& x, EdgeT commonEdge);
-            // Merges two polygons into a new one, this is used inside the urquhart tessellation computation
-            // p will be merged with n, which shares the longest edge of p, indexed (relative to p) by commonEdgeIdx
-            Polygon combinePolygonData_(const Polygon& p, const Polygon& n);
-            Polygon mergePolygons_(Polygon& p, Polygon& n, EdgeT commonEdge);
+            // Uses the triangles of the delaunay triangulation to build an "urquhart tessellation"
+            void urquhartTesselation();
+            
+            // Create a new polygon from existing polyons
+            Polygon mergePolygons(Polygon& p, Polygon& n, int edgeIndexInP);
+            
+            void printPolygon(const Polygon& p);
+
+            bool isNextEdgeBigger(int prevIdx, int nextIdx);
     };
 }

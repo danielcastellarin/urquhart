@@ -1,0 +1,13 @@
+obs_ranger:
+  forestFile: coolForest.txt    # local from 'urquhart' package
+  observationRanges:
+    - 30
+    - 1000
+  collisionRadius: 0.5
+  startPoseX: 500
+  startPoseY: 500
+  startPoseTheta: 1
+  # successfulObservationProbability: 0.95
+  # treePositionStandardDeviation: 0.1
+  # randomSeed: 15
+  outputDirName: big_range_testing

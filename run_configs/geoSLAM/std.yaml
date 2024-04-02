@@ -1,0 +1,4 @@
+graph_builder:
+  outputDirName: GSLAM_sc
+  debug: true
+  output: true

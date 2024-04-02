@@ -1,6 +1,5 @@
-#include <parse_config.hpp>
-#include <observation.hpp>
 #include <matching.hpp>
+#include <logging.hpp>
 #include <memory>
 #include <random>
 #include <iostream>
@@ -11,53 +10,119 @@
 #include <algorithm>
 #include <iostream>
 
+#include <vector>
+
+// Code should error if invalid run configuration provided
+struct OldSimConfig
+{
+    // Required Parameters
+    std::vector<Tree> forest;
+    std::string forestFile, pathType;
+    double distanceToTravel, distanceBetweenObservations, observationRadius, 
+    collisionRadius, landmarkAssociationThreshold, treeAssociationThreshold, 
+    // Optional Parameters
+    successfulObservationProbability = 1, treePositionStandardDeviation = 0, treeRadiusStandardDeviation = 0;
+    int initializationAttempts = 10000, numObservationsForValidLandmark = 5, randomSeed = -1;
+    bool givenStartPose = false;
+    Pose initialPose;
+    std::string outputDirName;
+
+    // Each config file is designed to be a static run config
+    OldSimConfig(std::string path)
+    {
+        // Assume each line is describes a key-value pair (space-separated)
+        std::ifstream infile(path);
+        std::string key,value;
+        std::unordered_map<std::string, std::string> options;
+        while (infile >> key >> value) options[key] = value;
+        infile.close();
+
+        // Required parameters
+        forestFile = options["forestFile"];
+        forest = readForestFile(forestFile);
+        pathType = options["pathType"];
+        distanceToTravel = atof(options["distanceToTravel"].c_str());
+        distanceBetweenObservations = atof(options["distanceBetweenObservations"].c_str());
+        observationRadius = atof(options["observationRange"].c_str()); // Note "Radius" and "Range"!
+        collisionRadius = atof(options["collisionRadius"].c_str());
+        landmarkAssociationThreshold = atof(options["landmarkAssociationThreshold"].c_str());
+        treeAssociationThreshold = atof(options["treeAssociationThreshold"].c_str());
+
+        // Optional parameters
+        if (options.find("successfulObservationProbability") != options.end()) 
+            successfulObservationProbability = atof(options["successfulObservationProbability"].c_str());
+        if (options.find("treePositionStandardDeviation") != options.end())
+            treePositionStandardDeviation = atof(options["treePositionStandardDeviation"].c_str());
+        if (options.find("treeRadiusStandardDeviation") != options.end())
+            treeRadiusStandardDeviation = atof(options["treeRadiusStandardDeviation"].c_str());
+        if (options.find("startPoseX") != options.end() && options.find("startPoseY") != options.end() && options.find("startPoseTheta") != options.end()) {
+            initialPose = Pose(atof(options["startPoseX"].c_str()), atof(options["startPoseY"].c_str()), atof(options["startPoseTheta"].c_str()));
+            givenStartPose = true;
+        }
+        if (options.find("initializationAttempts") != options.end())
+            initializationAttempts = atoi(options["initializationAttempts"].c_str());
+        if (options.find("numObservationsForValidLandmark") != options.end())
+            numObservationsForValidLandmark = atoi(options["numObservationsForValidLandmark"].c_str());
+        if (options.find("randomSeed") != options.end())
+            randomSeed = atoi(options["randomSeed"].c_str());
+        if (options.find("outputDirName") != options.end() && options["outputDirName"].find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890_-") == std::string::npos)
+            outputDirName = options["outputDirName"];
+        else {
+            int idx = forestFile.find("/");
+            outputDirName = pathType + "-" + forestFile.substr(idx >= 0 ? idx+1 : 0, forestFile.find(".")-idx-1);
+        }
+
+    }
+    bool isValid() { // TODO
+        // successfulObservationProbability should be [0,1]
+        // initialPose should be within bounding box of forest (requires forest file parsed though, also forest bounding box needs to be stored in its file, which it currently is not)
+        // path type is a valid option
+        // all other numeric inputs are non-negative
+        return true;
+    }
+    void outputConfig(std::ostream& out) { 
+        out << "Forest file used: " << forestFile << std::endl;
+        out << "Path type: " << pathType << std::endl;
+        out << "Distance to travel: " << distanceToTravel << std::endl;
+        out << "Distance between observations: " << distanceBetweenObservations << std::endl;
+        out << "Observation radius: " << observationRadius << std::endl;
+        out << "Collision width: " << collisionRadius << std::endl;
+        out << "Landmark association threshold: " << landmarkAssociationThreshold << std::endl;
+        out << "Point association threshold: " << treeAssociationThreshold << std::endl;
+        out << "Detection noise: " << successfulObservationProbability << std::endl;
+        out << "Position noise: " << treePositionStandardDeviation << std::endl;
+        out << "Tree radius noise: " << treeRadiusStandardDeviation << std::endl;
+        out << "Maximum initialization attempts: " << initializationAttempts << std::endl;
+        out << "Number of observations to validate a landmark: " << numObservationsForValidLandmark << std::endl;
+        out << "Starting pose input: " << (givenStartPose ? initialPose.printPose() : "None") << std::endl;
+    }
+};
+
 // IO stuff
 
 std::string buildFilePath(std::string dirName, std::string fileName) { return (dirName.empty() ? "" : dirName+"/") + fileName; }
 std::string buildDirectoryPath(std::string parentDir, std::string childDir) { return parentDir+(childDir.empty() ? "" : "/"+childDir); }
 
-void writeObservationToFile(std::string fileName, const std::vector<Tree>& trees, std::string dirName = "") {
-    std::ofstream out(buildFilePath(dirName, fileName));
-    for (const Tree& t : trees) out << t.toString() << std::endl;
-    out.close();
-}
-
-void writeHierarchyToFile(std::string fileName, const urquhart::Observation& trees, std::string dirName = "") {
+void writeHierarchyFiles(std::string fileName, const urquhart::Observation& trees, std::string dirName = "") {
     std::system(("mkdir -p " + dirName+"/p").c_str());
     std::system(("mkdir -p " + dirName+"/t").c_str());
     std::system(("mkdir -p " + dirName+"/h").c_str());
     std::system(("mkdir -p " + dirName+"/d").c_str());
-    std::ofstream plyOut(buildFilePath(dirName+"/p", fileName)), triOut(buildFilePath(dirName+"/t", fileName)), hieOut(buildFilePath(dirName+"/h", fileName));
-    std::ofstream dscOut(buildFilePath(dirName+"/d", fileName));
+    std::ofstream plyOut(buildFilePath(dirName+"/p", fileName)), triOut(buildFilePath(dirName+"/t", fileName)),
+                    hieOut(buildFilePath(dirName+"/h", fileName)), dscOut(buildFilePath(dirName+"/d", fileName));
 
-    write_graphviz(hieOut, trees.H->graph);
-    
-    // Iterate over the indices of the Polygons in the hierarchy
-    for(auto pIdx : trees.H->get_children(trees.H->root)) {
-        for(auto ch : trees.H->graph[pIdx].points) plyOut << pIdx << " " << ch[0] << " " << ch[1] << "|";
-        plyOut << std::endl;
-        for(auto d : trees.H->graph[pIdx].descriptor) dscOut << d << " ";
-        dscOut << std::endl;
-        
-        // Iterate over the indices of the Triangles that compose this Polygon
-        for(auto tIdx : trees.H->traverse(pIdx)) {
-            // Retain only the Polygon objects that have three sides
-            if (trees.H->graph[tIdx].points.size() == 3) {
-                for(auto ch : trees.H->graph[tIdx].points) triOut << tIdx << " " << ch[0] << " " << ch[1] << "|";
-                triOut << std::endl;
-            }
-        }
-    }
+    logging::writeHierarchyToFile(trees, plyOut, triOut, hieOut, dscOut);
+
+    hieOut.close();
     plyOut.close();
     triOut.close();
-    hieOut.close();
     dscOut.close();
 }
 
 void writeMatchesToDirectory(std::string dirName, 
                             std::map<int, std::vector<std::pair<size_t, size_t>>> polyMatches, 
                             std::map<int, std::vector<std::pair<size_t, size_t>>> triangleMatches, 
-                            std::map<int, std::vector<std::pair<vecPtT, vecPtT>>> pointMatches) {
+                            std::map<int, std::vector<std::pair<PtLoc, PtLoc>>> pointMatches) {
     std::system(("mkdir -p " + dirName+"/polygonIDs").c_str());
     std::system(("mkdir -p " + dirName+"/triangleIDs").c_str());
     std::system(("mkdir -p " + dirName+"/points").c_str());
@@ -96,13 +161,14 @@ void writePosesToFile(std::string fileName, const std::vector<Pose>& poses, std:
 void writeObservationsToDirectory(std::string dirName, const std::vector<std::vector<Tree>>& observations) {
     int count = 0;
     std::system(("mkdir -p " + dirName).c_str());
-    for (const std::vector<Tree>& obs : observations) writeObservationToFile(std::to_string(count++)+".txt", obs, dirName);
+    for (const std::vector<Tree>& obs : observations)
+        logging::writeObservationToFile(buildFilePath(dirName, std::to_string(count++)+".txt"), obs);
 }
 
 void writePolyObservationsToDirectory(std::string dirName, const std::vector<urquhart::Observation>& observations) {
     int count = 0;
     std::system(("mkdir -p " + dirName).c_str());
-    for (const urquhart::Observation& obs : observations) writeHierarchyToFile(std::to_string(count++)+".txt", obs, dirName);
+    for (const urquhart::Observation& obs : observations) writeHierarchyFiles(std::to_string(count++)+".txt", obs, dirName);
 }
 
 struct RobotHistory
@@ -114,7 +180,7 @@ struct RobotHistory
     std::vector<urquhart::Observation> observationHistory;
     std::map<int, std::vector<std::pair<size_t, size_t>>> consecutivePolyMatches;
     std::map<int, std::vector<std::pair<size_t, size_t>>> consecutiveTriMatches;
-    std::map<int, std::vector<std::pair<vecPtT, vecPtT>>> consecutivePointMatches;
+    std::map<int, std::vector<std::pair<PtLoc, PtLoc>>> consecutivePointMatches;
 
     std::vector<Pose> globalFrameRobotPose;
     std::vector<Pose> odomFrameRobotPose;
@@ -124,32 +190,29 @@ struct RobotHistory
     void saveLocalObservation(std::vector<Tree> obs) {localFrameTreeHistory.push_back(obs);}
     void saveOdomObservation(std::vector<Tree> obs) {odomFrameTreeHistory.push_back(obs);}
 
-    void savePolygonObservation(PointVector trees, int obsIdx) {
+    void savePolygonObservation(Points& trees, int obsIdx) {
         observationHistory.push_back(urquhart::Observation(trees));
         if (obsIdx) {
             // Polygon Matching
             auto& currentObs = observationHistory.end()[-1], prevObs = observationHistory.end()[-2];
-            std::vector<size_t> refIds = currentObs.H->get_children(0), targIds = prevObs.H->get_children(0);
-            std::vector<std::pair<size_t, size_t>> polygonMatches;
-            matching::polygonMatching(currentObs, refIds, prevObs, targIds, 5, polygonMatches);
+
+            std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
+
+            // Polygon Matching (Level 2)
+            matching::polygonMatching(currentObs, currentObs.hier->getChildrenIds(0), prevObs, prevObs.hier->getChildrenIds(0), 5, polygonMatches);
             consecutivePolyMatches[obsIdx] = polygonMatches;
-            
-            // Triangle Matching
-            std::vector<std::pair<size_t, size_t>> triangleMatches;
-            for (auto pMatch : polygonMatches) {
-                refIds = currentObs.H->get_children(pMatch.first);
-                targIds = prevObs.H->get_children(pMatch.second);
+
+            // Triangle Matching (Level 1)
+            for (const auto& [refPoly, targPoly] : polygonMatches) {
                 // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-                matching::polygonMatching(currentObs, refIds, prevObs, targIds, 5, triangleMatches);
+                matching::polygonMatching(currentObs, currentObs.hier->getChildrenIds(refPoly), prevObs, prevObs.hier->getChildrenIds(targPoly), 5, triangleMatches);
             }
             consecutiveTriMatches[obsIdx] = triangleMatches;
 
-            // Point Matching
-            std::vector<std::pair<vecPtT, vecPtT>> pointMatches;
-            std::set<size_t> unique_matches;
-            for (auto tMatch : triangleMatches) {
-                urquhart::Polygon rT = currentObs.H->get_vertex(tMatch.first), tT = prevObs.H->get_vertex(tMatch.second);
-                matching::linePointMatching(rT, tT, pointMatches, unique_matches);
+            // Vertex Matching (Level 0)
+            std::vector<std::pair<PtLoc, PtLoc>> pointMatches; 
+            for (const auto& [refIdx, targIdx] : matching::pointIndexMatching(currentObs, prevObs, triangleMatches)) {
+                pointMatches.push_back({currentObs.landmarks.col(refIdx), prevObs.landmarks.col(targIdx)});
             }
             consecutivePointMatches[obsIdx] = pointMatches;
         }
@@ -208,7 +271,7 @@ class Path {
         Pose globalPose;
         Pose odomPose;
 
-        Path(SimConfig cfg) : rng(randomDevice()) {
+        Path(OldSimConfig cfg) : rng(randomDevice()) {
             env = cfg.forest;
             length = cfg.distanceToTravel;
             distBetweenObs = cfg.distanceBetweenObservations;
@@ -283,7 +346,8 @@ class Path {
                 // Initialize new vectors to store observed trees in reference to the robot and global frames
                 std::vector<Tree> globalFrameTrees;
                 std::vector<Tree> localFrameTreeObservations;
-                PointVector localTrees;
+                // Points localTrees(2, 1);
+                Points localTrees; 
                 std::vector<Tree> odomFrameTreeObservations;
 
                 // The robot's base orientation is in +y direction
@@ -298,6 +362,7 @@ class Path {
                 // ===============
 
                 // Observe trees within the robot's vicinity
+                int localTreeCount=0;
                 for (const Tree& t : env) {
                     // Calculate the tree's position relative to the robot
                     // Record the true position of the tree relative to the global frame (for visualization purposes)
@@ -313,7 +378,8 @@ class Path {
                         // Rotate the position of the tree so that it is oriented correctly (relative to the robot's current frame)
                         Tree localTree(x*globCos - y*globSin, x*globSin + y*globCos, treeRadius);
                         localFrameTreeObservations.push_back(localTree);
-                        localTrees.push_back(std::vector<double>{localTree.p.x, localTree.p.y});
+                        localTrees.conservativeResize(2, ++localTreeCount);
+                        localTrees.col(localTreeCount-1) = Eigen::Vector2d{localTree.p.x, localTree.p.y};
 
                         // Translate the tree's position again to be relative to the robot's odometry
                         // In other words, find where this tree should lie on the robot's map
@@ -340,7 +406,7 @@ class CirclePath : public Path {
     double thetaForHop;
 
     public:
-        CirclePath(SimConfig cfg) : Path(cfg) {
+        CirclePath(OldSimConfig cfg) : Path(cfg) {
             radius = cfg.distanceToTravel/(PI*2);
             thetaForHop = cfg.distanceBetweenObservations / radius;
             localCenter = Point(-radius, 0);
@@ -387,7 +453,7 @@ class CirclePath : public Path {
 class LinePath : public Path {
     double globalDeltaXPerObs, globalDeltaYPerObs;
     public:
-        LinePath(SimConfig cfg) : Path(cfg) {}
+        LinePath(OldSimConfig cfg) : Path(cfg) {}
         bool isValid() {
             globalDeltaXPerObs = distBetweenObs * cos(globalPose.theta+HALFPI), globalDeltaYPerObs = distBetweenObs * sin(globalPose.theta+HALFPI);
             return std::all_of(env.begin(), env.end(), NoStraightPathCollisions(globalPose, length, collisionWidth));
@@ -414,7 +480,7 @@ class SquarePath : public Path {
     bool isTurning = false;
 
     public:
-        SquarePath(SimConfig cfg) : Path(cfg), sideLen(cfg.distanceToTravel/4) {
+        SquarePath(OldSimConfig cfg) : Path(cfg), sideLen(cfg.distanceToTravel/4) {
             localPositions[0] = odomPose; // Reminder that odom starts with pose (0,0,0)
             double nextAngle;
             // FIXME, nextangle should be computed after next position, current implementation works accidentally
@@ -510,7 +576,7 @@ class TrianglePath : public Path {
     bool isTurning = false;
 
     public:
-        TrianglePath(SimConfig cfg) : Path(cfg), sideLen(cfg.distanceToTravel/3) {
+        TrianglePath(OldSimConfig cfg) : Path(cfg), sideLen(cfg.distanceToTravel/3) {
             localPositions[0] = odomPose; // Reminder that odom starts with pose (0,0,0)
             double nextAngle, prevAngleAdj = HALFPI;
             for (int i = 0; i<3; ++i) {
@@ -604,7 +670,7 @@ class Figure8Path : public Path {
     int stage = 0;
 
     public:
-        Figure8Path(SimConfig cfg) : Path(cfg) {
+        Figure8Path(OldSimConfig cfg) : Path(cfg) {
             singleCircleCircumference = cfg.distanceToTravel/2; // 2 circles, half the distance to travel per circle
             radius = singleCircleCircumference/(TWOPI); 
             thetaForHop = cfg.distanceBetweenObservations / radius;
@@ -679,7 +745,7 @@ int main(int argc, char* argv[]) {
     if (argc > 1) {
 
         // Parse config file and display this run's configs
-        SimConfig config(argv[1]);
+        OldSimConfig config(argv[1]);
         config.outputConfig(std::cout);
 
         // Initialize the path through the forest 
