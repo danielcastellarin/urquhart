@@ -2,3 +2,5 @@ graph_builder:
   outputDirName: GSLAM_sc
   debug: true
   output: true
+  polyMatchThreshStart: 0.5
+  polyMatchThreshStep: 0.25

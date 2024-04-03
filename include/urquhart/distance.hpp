@@ -50,6 +50,19 @@ inline Eigen::VectorXd centroidDistance(const Points& samples, const Eigen::Vect
   return (centroidMatrix - samples).array().square().colwise().sum().sqrt();
 }
 
+inline Eigen::VectorXd squaredDistanceToPoint(const Points& landmarks, const PtLoc& point) {
+  return (landmarks.colwise() - point).array().square().colwise().sum();
+}
+
+// inline Eigen::ArrayXi findClosestLdmksUnderThreshToPoint(const Points& landmarks, const PtLoc& point, double thresh) {
+//   Eigen::Array<bool, -1, 1> mask = squaredDistanceToPoint(landmarks, point).array() < thresh;
+//   Eigen::ArrayXi mask_idcs(mask.count(), 1);
+//   for (int z = 0, z_idx = 0; z < mask.rows(); ++z) {
+//     if (mask(z)) mask_idcs(z_idx++) = z;
+//   }
+//   return mask_idcs;
+// }
+
 
 inline size_t cantorPairing(size_t a, size_t b) {
   // a is always the smallest number

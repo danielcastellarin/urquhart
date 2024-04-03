@@ -63,6 +63,7 @@ def display_polygons(plt_axis, dirname, frameID, getObsFunc, headTitle):
         # plt_axis.text(sum(x)/len(x), sum(y)/len(y), int(i[0]))
 
 def draw_vis():
+    np.random.seed(10)
     # First row
     display_triangulation(ax[0][0], directory, frameID+1, get_local_obs, "Local")
     display_triangulation(ax[0][1], directory, frameID, get_global_obs, "Global")

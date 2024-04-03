@@ -41,6 +41,7 @@ void Observation::recomputeEdgeLengths() {
     for (Eigen::Index i = 0; i < triangulationEdges.cols(); ++i) {
         triangulationEdgeLengths(i) = euclideanDistance2D(landmarks.col(triangulationEdges(0, i)), landmarks.col(triangulationEdges(1, i)));
     }
+    // TODO probably should recompute each polygon's descriptors too
 }
 
 
