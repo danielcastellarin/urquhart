@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <filesystem>
 
-// #define PCL_NO_PRECOMPILE
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -18,38 +17,6 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <ros/ros.h>
 
-
-
-/*
-    vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-    For every n individual frames, construct a keyframe K (using the following customized local bundle adjustment steps) (NOTE: n should be chosen based on the robot's speed and observation range, such that sequential keyframes exhibit partial overlap for the observed landmarks)
-        For each individual frame (a set of 2D landmarks given as input), construct the local geometric hierarchy (triangulation, polygons, etc.)
-            Perform data association with the previous frame, ideally making enough links between the landmarks in each frame
-            If a certain proportion of landmarks per frame do not have associations, perform association with preceeding frames until that is fixed
-        Once enough associations have been made for the current individual frame, perform RANSAC and estimate the current position of the robot
-        After all n frames have been processed, approximate the true positions of each landmark w.r.t. the fixed reference point (the location of the robot in either the first or last individual frame)
-        At this point, keyframe K should consist of a robot pose, a set of 2D landmark positions, and a newly constructed geometric hierarchy for the finalized positions of the landmarks (throw away everything else)
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-    Using the geometric hierarchy from keyframe K, perform point association with the global geometric hierarchy
-        Maybe use the current odometry estimate from the global map to restrict the number of global polygons that would be eligible for matching with the local keyframe polygons
-        If not enough matches are made, then the search space could incrementally expand to include more polygons. if this is too complicated, then we could just query all the global polygons and call it a day
-    
-    Once enough associations have been made, use RANSAC to estimate the current position of the robot with respect to the global reference frame
-    
-    Create graph nodes and edges:
-        A new node Xi for the new position of the robot with respect to the global reference frame and other nodes for any newly observed landmarks from the most recent keyframe
-        A new edge between Xi and Xi-1 (representing robot odometry)
-        A new edge between Xi and the nodes corresponding to each landmark observed in this keyframe (representing the spatial relationship between the robot and the observed landmarks at the time of this keyframe)
-    
-    Using the updated graph structure, run back-end optimization to provide better robot pose and landmark location estimates
-    
-    Perform the following customized global bundle adjustment steps to ensure that I am making the minimum required changes to the global map to keep the system accurate and stable over time
-        TODO: somehow use the intermediary outputs from the back-end optimization process to measure how much the landmark positions have changed?
-        If enough landmarks have been noticeably moved and/or have added to the global map, recompute the global geometric hierarchy
-            Potentially only do complete triangulation and polygon recomputation for specific region of the global map, otherwise just adjust point locations without modifying the configuration of parent triangles or polygons (which I imagine is much more scalable)
-
-*/
 
 // Observations are not associated when tf is not initialized
 struct ObsRecord {
@@ -67,6 +34,7 @@ ros::Publisher kfpub;
 
 std::vector<ObsRecord> unassociatedObs;
 std::set<ObsRecord> kfObs;
+bool isDebug;
 
 void publishKeyFrame(const pcl::PointCloud<pcl::PointXY>& kfPoints, int seqID, std::string frameName) {
     sensor_msgs::PointCloud2 pc2_msg;
@@ -77,12 +45,12 @@ void publishKeyFrame(const pcl::PointCloud<pcl::PointXY>& kfPoints, int seqID, s
     kfpub.publish(pc2_msg);
 }
 
-pcl::PointXY pclConvert(PtLoc p) {
+pcl::PointXY pclConvert(const PtLoc& p) {
     pcl::PointXY myPoint;
     myPoint.x = p[0]; myPoint.y = p[1];
     return myPoint;
 }
-pcl::PointXY pclConvert(Eigen::Vector4d p) {
+pcl::PointXY pclConvert(const Eigen::Vector4d& p) {
     pcl::PointXY myPoint;
     myPoint.x = p[0]; myPoint.y = p[1];
     return myPoint;
@@ -122,9 +90,10 @@ std::vector<std::pair<Eigen::Index, Eigen::Index>> matchObsIdx(const urquhart::O
     // Perform traditional data association 
     std::vector<std::pair<Eigen::Index, Eigen::Index>> vertexMatches = matching::hierarchyIndexMatching(ref, targ, polyMatchThresh);
 
-    // Post-process: double-check matches, remove any where pairs are not certain distance from each other
+    // Post-process: double-check matches, remove any where pairs are beyond a certain distance from each other
     for (auto iter = vertexMatches.begin(); iter != vertexMatches.end(); ++iter) {
-        if (std::abs(ref.ldmkX(iter->first) - targ.ldmkX(iter->second)) > validPointMatchThresh || std::abs(ref.ldmkY(iter->first) - targ.ldmkY(iter->second)) > validPointMatchThresh)
+        // if (std::abs(ref.ldmkX(iter->first) - targ.ldmkX(iter->second)) > validPointMatchThresh || std::abs(ref.ldmkY(iter->first) - targ.ldmkY(iter->second)) > validPointMatchThresh)
+        if (((ref.landmarks.col(iter->first) - targ.landmarks.col(iter->second)).array().abs() > validPointMatchThresh).any())
             vertexMatches.erase(iter);
     }
     // arrogance check: if matched points across differential observations are not very close, then the match is probably wrong 
@@ -134,8 +103,6 @@ std::vector<std::pair<Eigen::Index, Eigen::Index>> matchObsIdx(const urquhart::O
 
 void tfCloud(Eigen::Matrix4d existingTfToBase, Eigen::Matrix4d refToTargTf, ObsRecord& obsRec) {
     Eigen::Matrix4d fullTfToBase = refToTargTf * existingTfToBase;
-    // std::cout << "Frame " << obsRec.frameId << " TF to base:\n" << fullTfToBase << std::endl;
-
     // Temporarily convert the pointcloud to 3D to transform into base frame 
     pcl::PointCloud<pcl::PointXYZ> nonAssociatedCloud, newlyAssociatedCloud;
     pcl::copyPointCloud(obsRec.cloud, nonAssociatedCloud);
@@ -161,7 +128,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     // Try to match the current frame with any that have been associated with a base frame
     if (!kfObs.empty()) {
         std::vector<std::pair<Eigen::Index, Eigen::Index>> pointMatchIndices;
-        std::cout << "Matching frame " << myObs.frameId << " with associated clouds." << std::endl;
+        if (isDebug) std::cout << "Matching frame " << myObs.frameId << " with associated clouds." << std::endl;
         
         // Match (current frame --> associated frame) until match found
         auto revKfIter = kfObs.rbegin();
@@ -170,10 +137,12 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         } while (pointMatchIndices.size() < 2 && ++revKfIter != kfObs.rend());
 
         // Store observation data
-        if (pointMatchIndices.size() < 2) { unassociatedObs.push_back(myObs); std::cout << "No matches found." << std::endl;
+        if (pointMatchIndices.size() < 2) {
+            unassociatedObs.push_back(myObs);
+            if (isDebug) std::cout << "No matches found." << std::endl;
         } else {
             // Estimate tf from reference to target frame (assuming we have gotten rid of outliers already)
-            std::cout << "Found match with frame " << revKfIter->frameId << ", associating..." << std::endl;
+            if (isDebug) std::cout << "Found match with frame " << revKfIter->frameId << ", associating..." << std::endl;
             tfCloud(revKfIter->tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, myObs.obs, revKfIter->obs), myObs);
 
             // Try to match all unassociated observations with the current observation
@@ -181,7 +150,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             while (obsIter != unassociatedObs.end()) {
                 pointMatchIndices = matchObsIdx(obsIter->obs, myObs.obs, 5, 1.5);
                 if (pointMatchIndices.size() >= 2) {
-                    std::cout << "Also matched with frame " << obsIter->frameId << std::endl;
+                    if (isDebug) std::cout << "Also matched with frame " << obsIter->frameId << std::endl;
                     tfCloud(myObs.tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, obsIter->obs, myObs.obs), *obsIter);
                     obsIter = unassociatedObs.erase(obsIter);
                 }
@@ -191,7 +160,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
     } else if (!unassociatedObs.empty()) {  // Try to match the current frame with any unassociated frames
         std::vector<std::pair<Eigen::Index, Eigen::Index>> pointMatchIndices;
-        std::cout << "Trying to find base frame for frame " << myObs.frameId << std::endl;
+        if (isDebug) std::cout << "Trying to find base frame for frame " << myObs.frameId << std::endl;
 
         // Match (current frame --> latest unassociated frame) until match found
         auto revIter = unassociatedObs.rbegin();
@@ -200,7 +169,9 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         } while (pointMatchIndices.size() < 2 && ++revIter != unassociatedObs.rend());
 
         // Store observation data
-        if (pointMatchIndices.size() < 2) { unassociatedObs.push_back(myObs); std::cout << "None found." << std::endl;
+        if (pointMatchIndices.size() < 2) {
+            unassociatedObs.push_back(myObs);
+            if (isDebug) std::cout << "None found." << std::endl;
         } else {
             // Assign the target frame of this match as the base of the keyframe
             revIter->tf = Eigen::Matrix4d::Identity();
@@ -208,7 +179,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             kfObs.insert(*revIter);
 
             // Estimate tf from reference to target frame (assuming we have gotten rid of outliers already)
-            std::cout << "Base frame found at frame " << revIter->frameId << ", adding frame " << myObs.frameId << " behind it." << std::endl;
+            if (isDebug) std::cout << "Base frame found at frame " << revIter->frameId << ", adding frame " << myObs.frameId << " behind it." << std::endl;
             tfCloud(revIter->tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, myObs.obs, revIter->obs), myObs);
             
             // Remove the base frame from the unassociated list and advance the iterator
@@ -219,7 +190,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             while (revIter != unassociatedObs.rend()) {
                 pointMatchIndices = matchObsIdx(revIter->obs, myObs.obs, 5, 1.5);
                 if (pointMatchIndices.size() >= 2) {
-                    std::cout << "Including frame " << revIter->frameId << " in the association." << std::endl;
+                    if (isDebug) std::cout << "Including frame " << revIter->frameId << " in the association." << std::endl;
                     tfCloud(myObs.tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, revIter->obs, myObs.obs), *revIter);
                     unassociatedObs.erase(std::next(revIter).base()); // iterator should not move
                 }
@@ -229,7 +200,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     } else {
         // If this is the first observation, add it to the unassociated ones
         unassociatedObs.push_back(myObs);
-        std::cout << "Initializing unassociated observations at frame " << myObs.frameId << std::endl;
+        if (isDebug) std::cout << "Initializing unassociated observations at frame " << myObs.frameId << std::endl;
     }
 
     // std::cout << "Unassociated: ";
@@ -248,9 +219,11 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     // If number of associated frames exceeds limit or there have been too many unassociated frames since one was associated: send to backend
     if (kfObs.size() >= n || (!kfObs.empty() && kfObs.rbegin()->frameId + m <= cloudMsg->header.seq)) {
         // At this point, all pc in kfObs should be in the same reference frame
-        std::cout << "Keyframe with IDs ";
-        for (auto& obs : kfObs) std::cout << obs.frameId << "(" << obs.cloud.size() << "), ";
-        std::cout << " sending..." << std::endl;
+        if (isDebug) {
+            std::cout << "Keyframe with IDs ";
+            for (auto& obs : kfObs) std::cout << obs.frameId << "(" << obs.cloud.size() << "), ";
+            std::cout << " sending..." << std::endl;
+        }
 
         // TODO talk to Bailey about efficiently deriving the cluster centers out in either nlogn or linear time
         // (maybe this greedy solution is good enough)
@@ -280,10 +253,10 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
     // If an unassociated frame becomes too old before it can be associated, remove it
     if (!unassociatedObs.empty() && unassociatedObs.front().frameId + m <= cloudMsg->header.seq) {
-        std::cout << "Deleting frame " << unassociatedObs.front().frameId << " from unassociated observations." << std::endl;
+        if (isDebug) std::cout << "Deleting frame " << unassociatedObs.front().frameId << " from unassociated observations." << std::endl;
         unassociatedObs.erase(unassociatedObs.begin());
     }
-    std::cout << "===============================================================" << std::endl;
+    if (isDebug) std::cout << "===============================================================" << std::endl;
     
 
     // if needing to debug...
@@ -298,9 +271,7 @@ int main(int argc, char **argv) {
     // Initialize Node and read in private parameters
     ros::init(argc, argv, "keyframe_maker");
     ros::NodeHandle n("~");
-    // SimConfig cfg(n);
-    // cfg.outputConfig(std::cout);
-    // ros::Rate pub_rate(cfg.pubRate);    // 10Hz by default
+    isDebug = n.param("debug", true);
 
     ros::Subscriber sub = n.subscribe("/sim_path/local_points", 10, parse2DPC);
     kfpub = n.advertise<sensor_msgs::PointCloud2>("keyframe", 10);
