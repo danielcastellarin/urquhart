@@ -9,11 +9,13 @@
 #include <algorithm>
 #include <iostream>
 #include <filesystem>
+#include <sstream>
 
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <std_msgs/String.h>
 
 #include <ros/ros.h>
 #include <ros/package.h>
@@ -465,9 +467,13 @@ void findBestMatches(const Points& localLandmarks, const Points& globalLandmarks
     }
 }
 
+
+ros::Publisher polyPub, triPub, ptPub;
+
+
 SLAMGraph g;
 Eigen::Vector3d mostRecentGlobalPose; // if not tracking updates to all previous robot poses
-bool isDebug = false, isOutput = false;
+bool isDebug = false, isOutput = false, pyPub = false;
 double polyMatchThresh, polyMatchThreshStep;
 std::string outputPath;
 
@@ -650,15 +656,69 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
     // Print the graph to a file (for debugging)
     if (isOutput) {
-        std::cout << "Logging global data... ";
+        if (isDebug) std::cout << "Logging global data... ";
         writeHierarchyFiles(*g.geoHier, outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
-        std::cout << "   Done!" << std::endl;
-        std::cout << "Saving graph data... ";
+        if (isDebug) std::cout << "   Done!" << std::endl;
+        if (isDebug) std::cout << "Saving graph data... ";
         g.writeGraphToFiles(outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
-        std::cout << "   Done!" << std::endl;
+        if (isDebug) std::cout << "   Done!" << std::endl;
+    }
+
+    if (pyPub) {
+        // TODO worst-case if python isn't catching the frames in time, stuff it all in one message
+
+        std::stringstream polyStream, triStream, ptStream;
+        polyStream << g.poseNodeList.size() << "!";
+        triStream << g.poseNodeList.size() << "!";
+        ptStream << g.poseNodeList.size() << "!";
+        
+        // Iterate over the indices of the Polygons in the hierarchy
+        for (auto pIdx : g.geoHier->hier->getChildrenIds(0)) {
+            for (int i = 0; i < g.geoHier->hier->getPolygon(pIdx).landmarkRefs.size(); ++i) {
+                auto myPoint = g.geoHier->landmarks.col(g.geoHier->hier->getPolygon(pIdx).landmarkRefs(i));
+                polyStream << (i!=0 ? "|": "") << myPoint[0] << " " << myPoint[1];
+            }
+            polyStream << ":";
+            
+            // Iterate over the indices of the Triangles that compose this Polygon
+            for (auto tIdx : g.geoHier->hier->getChildrenIds(pIdx)) {
+                // Retain only the Polygon objects that have three sides
+                if (g.geoHier->hier->getPolygon(tIdx).n == 3) {
+                    for (int i = 0; i < g.geoHier->hier->getPolygon(tIdx).landmarkRefs.size(); ++i) {
+                        auto myPoint = g.geoHier->landmarks.col(g.geoHier->hier->getPolygon(tIdx).landmarkRefs(i));
+                        triStream << (i!=0 ? "|": "") << myPoint[0] << " " << myPoint[1];
+                    }
+                    triStream << ":";
+                }
+            }
+        }
+
+        int i = 0;
+        for (const PtLoc& ldmk : g.geoHier->landmarks.colwise()) {
+            ptStream << (i++ != 0 ? "|": "") << ldmk(0) << " " << ldmk(1);
+        }
+        
+        
+        // Construct message from string streams
+        std_msgs::String polyMsg, triMsg, ptsMsg;
+        polyMsg.data = polyStream.str();
+        triMsg.data = triStream.str();
+        ptsMsg.data = ptStream.str();
+
+        // Publish messages
+        polyPub.publish(polyMsg);
+        triPub.publish(triMsg);
+        ptPub.publish(ptsMsg);
     }
 
 }
+
+
+// TODO increase matching iteration count
+// implement alternate association view in visualization
+// ensure polygon descriptors are recomputed when recomputeEdgeLengths is called
+// play with polygon matching algorithm to be not greedy
+// Investigate eigen error in keyframe code, might be related to the arrogant distance check?
 
 
 int main(int argc, char **argv) {
@@ -669,6 +729,7 @@ int main(int argc, char **argv) {
     std::string absolutePackagePath = ros::package::getPath("urquhart");
     isDebug = n.param("debug", true);
     isOutput = n.param("output", true);
+    pyPub = n.param("pyPub", false);
     polyMatchThresh = n.param("polyMatchThreshStart", 5);
     polyMatchThreshStep = n.param("polyMatchThreshStep", 1);
     n.param<std::string>("outputDirName", outputPath, "gTEST");
@@ -701,6 +762,10 @@ int main(int argc, char **argv) {
 
     
     ros::Subscriber sub = n.subscribe("/keyframe_maker/keyframe", 10, constructGraph);
+    polyPub = n.advertise<std_msgs::String>("polygons", 10);
+    triPub = n.advertise<std_msgs::String>("triangles", 10);
+    ptPub = n.advertise<std_msgs::String>("points", 10);
+    
 
     ros::spin();
 

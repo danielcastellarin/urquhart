@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+# NOTE: uncomment when using visualization remotely (must be executed in terminal, not vs code)
+# import matplotlib
+# matplotlib.use('GTK3Agg')
+
 import rospy
 import matplotlib as plt
 import sensor_msgs.point_cloud2 as pc2

@@ -95,8 +95,8 @@ std::vector<std::pair<Eigen::Index, Eigen::Index>> matchObsIdx(const urquhart::O
 
     // Post-process: double-check matches, remove any where pairs are beyond a certain distance from each other
     for (auto iter = vertexMatches.begin(); iter != vertexMatches.end(); ++iter) {
-        // if (std::abs(ref.ldmkX(iter->first) - targ.ldmkX(iter->second)) > validPointMatchThresh || std::abs(ref.ldmkY(iter->first) - targ.ldmkY(iter->second)) > validPointMatchThresh)
-        if (((ref.landmarks.col(iter->first) - targ.landmarks.col(iter->second)).array().abs() > validPointMatchThresh).any())
+        if (std::abs(ref.ldmkX(iter->first) - targ.ldmkX(iter->second)) > validPointMatchThresh || std::abs(ref.ldmkY(iter->first) - targ.ldmkY(iter->second)) > validPointMatchThresh)
+        // if (((ref.landmarks.col(iter->first) - targ.landmarks.col(iter->second)).array().abs() > validPointMatchThresh).any())
             vertexMatches.erase(iter);
     }
     // arrogance check: if matched points across differential observations are not very close, then the match is probably wrong 
