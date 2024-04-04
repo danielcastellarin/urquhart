@@ -30,7 +30,7 @@ struct ObsRecord {
 };
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr bigPcPtr(new pcl::PointCloud<pcl::PointXYZ>());
-ros::Publisher kfpub;
+ros::Publisher kfpub, bigCloudPub;
 
 std::vector<ObsRecord> unassociatedObs;
 std::set<ObsRecord> kfObs;
@@ -39,6 +39,15 @@ int maxKeyframeWidth, numSkippedFramesBeforeSend;
 double polygonMatchThresh, validPointMatchThresh, clusterTolerance;
 
 
+
+void publishAllPoints(const pcl::PointCloud<pcl::PointXYZ>::Ptr& allPoints, int seqID, std::string frameName) {
+    sensor_msgs::PointCloud2 pc2_msg;
+    pcl::toROSMsg(*allPoints, pc2_msg);
+    pc2_msg.header.frame_id = frameName;
+    pc2_msg.header.stamp = ros::Time::now();
+    pc2_msg.header.seq = seqID;
+    bigCloudPub.publish(pc2_msg);
+}
 
 void publishKeyFrame(const pcl::PointCloud<pcl::PointXY>& kfPoints, int seqID, std::string frameName) {
     sensor_msgs::PointCloud2 pc2_msg;
@@ -92,17 +101,21 @@ Eigen::Matrix4d computeRigid2DEuclidTfFromIndices(const std::vector<std::pair<Ei
 std::vector<std::pair<Eigen::Index, Eigen::Index>> matchObsIdx(const urquhart::Observation &ref, const urquhart::Observation &targ, double polyMatchThresh, double validPointMatchThresh) {
 
     // Perform traditional data association 
-    std::vector<std::pair<Eigen::Index, Eigen::Index>> vertexMatches = matching::hierarchyIndexMatching(ref, targ, polyMatchThresh);
+    std::vector<std::pair<Eigen::Index, Eigen::Index>> finalVertexMatches, vertexMatches = matching::hierarchyIndexMatching(ref, targ, polyMatchThresh);
 
     // Post-process: double-check matches, remove any where pairs are beyond a certain distance from each other
-    for (auto iter = vertexMatches.begin(); iter != vertexMatches.end(); ++iter) {
-        if (std::abs(ref.ldmkX(iter->first) - targ.ldmkX(iter->second)) > validPointMatchThresh || std::abs(ref.ldmkY(iter->first) - targ.ldmkY(iter->second)) > validPointMatchThresh)
-        // if (((ref.landmarks.col(iter->first) - targ.landmarks.col(iter->second)).array().abs() > validPointMatchThresh).any())
-            vertexMatches.erase(iter);
+    // for (auto iter = vertexMatches.begin(); iter != vertexMatches.end(); ++iter) {
+    //     if (std::abs(ref.ldmkX(iter->first) - targ.ldmkX(iter->second)) > validPointMatchThresh || std::abs(ref.ldmkY(iter->first) - targ.ldmkY(iter->second)) > validPointMatchThresh)
+    //     // if (((ref.landmarks.col(iter->first) - targ.landmarks.col(iter->second)).array().abs() > validPointMatchThresh).any())
+    //         vertexMatches.erase(iter);
+    // }
+    // arrogance check: if matched points across differential observations are not very close, then the match is probably wrong
+    for (const auto& [refIdx, targIdx] : vertexMatches) {
+        if (((ref.landmarks.col(refIdx) - targ.landmarks.col(targIdx)).array().abs() < validPointMatchThresh).all())
+            finalVertexMatches.push_back({refIdx, targIdx});
     }
-    // arrogance check: if matched points across differential observations are not very close, then the match is probably wrong 
 
-    return vertexMatches;
+    return finalVertexMatches;
 }
 
 void tfCloud(Eigen::Matrix4d existingTfToBase, Eigen::Matrix4d refToTargTf, ObsRecord& obsRec) {
@@ -111,6 +124,7 @@ void tfCloud(Eigen::Matrix4d existingTfToBase, Eigen::Matrix4d refToTargTf, ObsR
     pcl::PointCloud<pcl::PointXYZ> nonAssociatedCloud, newlyAssociatedCloud;
     pcl::copyPointCloud(obsRec.cloud, nonAssociatedCloud);
     pcl::transformPointCloud(nonAssociatedCloud, newlyAssociatedCloud, fullTfToBase);
+    std::cout << "transforming cloud with tf: " << std::endl << fullTfToBase << std::endl;
 
     // Add transformed points to keyframe pointcloud to baseframe and store tf in the frame's observation record
     *bigPcPtr += newlyAssociatedCloud;
@@ -226,6 +240,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             for (auto& obs : kfObs) std::cout << obs.frameId << "(" << obs.cloud.size() << "), ";
             std::cout << " sending..." << std::endl;
         }
+        publishAllPoints(bigPcPtr, kfObs.begin()->frameId, "sensor_frame");
 
         // TODO talk to Bailey about efficiently deriving the cluster centers out in either nlogn or linear time
         // (maybe this greedy solution is good enough)
@@ -233,8 +248,8 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         pcl::EuclideanClusterExtraction<pcl::PointXYZ> ece;
         ece.setInputCloud(bigPcPtr);
         // ece.setClusterTolerance(0.1); // Set the spatial cluster tolerance (in meters)
-        ece.setClusterTolerance(0.2); // Set the spatial cluster tolerance (in meters)
-        ece.setMinClusterSize(1);
+        ece.setClusterTolerance(0.02); // Set the spatial cluster tolerance (in meters)
+        ece.setMinClusterSize(2);
         ece.setMaxClusterSize(maxKeyframeWidth);
         std::vector<pcl::PointIndices> cluster_indices;
         ece.extract(cluster_indices);
@@ -249,6 +264,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         
         // TODO should timestamp of message be that of the base frame or whatever the current time is?
         // TODO frameId be fresh for keyframes?
+        // if (outputCloud.size() > )
         publishKeyFrame(outputCloud, kfObs.begin()->frameId, "sensor_frame");
         kfObs.clear();
         bigPcPtr->clear();  // TODO might be overkill because it gets overwritten when base frame re-inits anyway
@@ -274,7 +290,7 @@ int main(int argc, char **argv) {
     // Initialize Node and read in private parameters
     ros::init(argc, argv, "keyframe_maker");
     ros::NodeHandle n("~");
-    
+
     isDebug = n.param("debug", true);
     maxKeyframeWidth = n.param("maxKeyframeWidth", 5);
     numSkippedFramesBeforeSend = n.param("numSkippedFramesBeforeSend", 3);
@@ -284,6 +300,7 @@ int main(int argc, char **argv) {
 
     ros::Subscriber sub = n.subscribe("/sim_path/local_points", 10, parse2DPC);
     kfpub = n.advertise<sensor_msgs::PointCloud2>("keyframe", 10);
+    bigCloudPub = n.advertise<sensor_msgs::PointCloud2>("allPoints", 10);
 
     ros::spin();
 

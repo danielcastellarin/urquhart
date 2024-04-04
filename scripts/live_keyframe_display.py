@@ -80,6 +80,7 @@ def listener():
     global obsRange
     rospy.init_node('kf_display')
     rospy.Subscriber("/keyframe_maker/keyframe", pc2.PointCloud2, callback)
+    # rospy.Subscriber("/keyframe_maker/allPoints", pc2.PointCloud2, callback)
 
     # plt.ion()
     # plt.show(block=False)

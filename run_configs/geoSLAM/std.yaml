@@ -19,7 +19,7 @@ keyframe_maker:
   maxKeyframeWidth: 5
   numSkippedFramesBeforeSend: 3
   polygonMatchThresh: 3
-  validPointMatchThresh: 1
+  validPointMatchThresh: 0.75
   clusterTolerance: 0.01
 
 graph_builder:
