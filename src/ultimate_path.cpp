@@ -171,7 +171,9 @@ int main(int argc, char **argv)
             if (isDebug) ROS_INFO("%d", numFrames);
 
             // Publish data in ROS
-            publishObservation(gpPub, nextObs.globalTreePositions, nextObs.id, "global_frame");
+            std::string globalPoseHack = nextObs.globalPose.printPose();
+            publishObservation(gpPub, nextObs.globalTreePositions, nextObs.id, globalPoseHack);
+            // publishObservation(gpPub, nextObs.globalTreePositions, nextObs.id, "global_frame");
             publishObservation(lpPub, nextObs.localTreePositions, nextObs.id, "sensor_frame");
             geometry_msgs::Pose2D gP;
             gP.x = nextObs.globalPose.p.x; gP.y = nextObs.globalPose.p.y; gP.theta = nextObs.globalPose.theta;

@@ -6,5 +6,5 @@
 
     <!-- Local Bundle Adjustment Node -->
     <node pkg="urquhart" type="KeyframeGen" name="keyframe_maker" output="screen" />
-    <node pkg="urquhart" type="keyframe_display.py" name="kf_display" output="screen" />
+    <node pkg="urquhart" type="live_keyframe_display.py" name="kf_display" output="screen" />
 </launch>

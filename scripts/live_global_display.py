@@ -40,6 +40,7 @@ def draw_frame(id):
     display_triangulation(ax[0], id, allTriangles[id], allPoints[id])
     display_polygons(ax[1], id, allPolygons[id])
     
+    plt.tight_layout()
     plt.draw()
 
 
