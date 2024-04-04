@@ -137,6 +137,7 @@ int main(int argc, char **argv)
     SimConfig cfg(n);
     cfg.outputConfig(std::cout);
     ros::Rate pub_rate(cfg.pubRate);    // 10Hz by default
+    bool isDebug = n.param("debug", true);
 
     // Initialize the path through the forest
     Path* robotPath;
@@ -167,7 +168,7 @@ int main(int argc, char **argv)
         while (ros::ok() && !isFinished) {
             SimKeyframe nextObs = robotPath->observe();
             numFrames = nextObs.id;
-            ROS_INFO("%d", numFrames);
+            if (isDebug) ROS_INFO("%d", numFrames);
 
             // Publish data in ROS
             publishObservation(gpPub, nextObs.globalTreePositions, nextObs.id, "global_frame");

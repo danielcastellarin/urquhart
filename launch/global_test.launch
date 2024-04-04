@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <launch>
-    <rosparam file="$(find urquhart)/run_configs/sim_path/obsRadPath.yaml" command="load" />
+    <rosparam file="$(find urquhart)/run_configs/geoSLAM/std.yaml" command="load" />
+
+    <!-- Simulate robot observations -->
     <node pkg="urquhart" type="ultimate_path" name="sim_path" output="screen" />
 
-    <param name="/keyframe_maker/debug" type="bool" value="false" />
+    <!-- Local Bundle Adjustment Node -->
     <node pkg="urquhart" type="KeyframeGen" name="keyframe_maker" output="screen" />
 
-    <rosparam file="$(find urquhart)/run_configs/geoSLAM/std.yaml" command="load" />
+    <!-- Global GraphSLAM Node -->
     <node pkg="urquhart" type="PolygonSLAM" name="graph_builder" output="screen" />
 </launch>

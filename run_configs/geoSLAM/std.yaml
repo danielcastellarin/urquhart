@@ -1,3 +1,24 @@
+sim_path:
+  forestFile: coolForest.txt    # local from 'urquhart' package
+  pathType: circle
+  distanceToTravel: 200
+  distanceBetweenObservations: 0.2
+  observationRange: 40
+  collisionRadius: 0.3
+  successfulObservationProbability: 0.95
+  treePositionStandardDeviation: 0.1
+  landmarkAssociationThreshold: 0.8
+  treeAssociationThreshold: 0.5
+  pubRate: 15
+  outputDirName: serious_circle
+  randomSeed: 17
+  debug: false
+
+keyframe_maker:
+  debug: false
+  maxKeyframeWidth: 5
+  numSkippedFramesBeforeSend: 3
+
 graph_builder:
   outputDirName: GSLAM_sc
   debug: true

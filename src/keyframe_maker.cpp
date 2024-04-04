@@ -35,6 +35,9 @@ ros::Publisher kfpub;
 std::vector<ObsRecord> unassociatedObs;
 std::set<ObsRecord> kfObs;
 bool isDebug;
+int maxKeyframeWidth, numSkippedFramesBeforeSend;
+
+
 
 void publishKeyFrame(const pcl::PointCloud<pcl::PointXY>& kfPoints, int seqID, std::string frameName) {
     sensor_msgs::PointCloud2 pc2_msg;
@@ -214,10 +217,8 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     // std::cout << std::endl;
 
 
-    // n = max #associated frames before sending, m = #unassociated frames before sending any associated
-    int n = 5, m = 3; // TODO get this value from a param
     // If number of associated frames exceeds limit or there have been too many unassociated frames since one was associated: send to backend
-    if (kfObs.size() >= n || (!kfObs.empty() && kfObs.rbegin()->frameId + m <= cloudMsg->header.seq)) {
+    if (kfObs.size() >= maxKeyframeWidth || (!kfObs.empty() && kfObs.rbegin()->frameId + numSkippedFramesBeforeSend <= cloudMsg->header.seq)) {
         // At this point, all pc in kfObs should be in the same reference frame
         if (isDebug) {
             std::cout << "Keyframe with IDs ";
@@ -232,7 +233,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         ece.setInputCloud(bigPcPtr);
         ece.setClusterTolerance(0.1); // Set the spatial cluster tolerance (in meters)
         ece.setMinClusterSize(1);
-        ece.setMaxClusterSize(n);
+        ece.setMaxClusterSize(maxKeyframeWidth);
         std::vector<pcl::PointIndices> cluster_indices;
         ece.extract(cluster_indices);
 
@@ -252,7 +253,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     }
 
     // If an unassociated frame becomes too old before it can be associated, remove it
-    if (!unassociatedObs.empty() && unassociatedObs.front().frameId + m <= cloudMsg->header.seq) {
+    if (!unassociatedObs.empty() && unassociatedObs.front().frameId + numSkippedFramesBeforeSend <= cloudMsg->header.seq) {
         if (isDebug) std::cout << "Deleting frame " << unassociatedObs.front().frameId << " from unassociated observations." << std::endl;
         unassociatedObs.erase(unassociatedObs.begin());
     }
@@ -272,6 +273,8 @@ int main(int argc, char **argv) {
     ros::init(argc, argv, "keyframe_maker");
     ros::NodeHandle n("~");
     isDebug = n.param("debug", true);
+    maxKeyframeWidth = n.param("maxKeyframeWidth", 5);
+    numSkippedFramesBeforeSend = n.param("numSkippedFramesBeforeSend", 3);
 
     ros::Subscriber sub = n.subscribe("/sim_path/local_points", 10, parse2DPC);
     kfpub = n.advertise<sensor_msgs::PointCloud2>("keyframe", 10);
