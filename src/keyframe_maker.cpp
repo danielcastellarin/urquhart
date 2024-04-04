@@ -36,6 +36,7 @@ std::vector<ObsRecord> unassociatedObs;
 std::set<ObsRecord> kfObs;
 bool isDebug;
 int maxKeyframeWidth, numSkippedFramesBeforeSend;
+double polygonMatchThresh, validPointMatchThresh, clusterTolerance;
 
 
 
@@ -125,7 +126,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     // Construct a PointVector for the given tree positions
     Points vectorOfTrees(2, localCloud.size());
     int idx = 0;
-    for (const auto& p : localCloud) vectorOfTrees.col(idx++) = Eigen::Vector2d{p.x, p.y};
+    for (const auto& p : localCloud) vectorOfTrees.col(idx++) = PtLoc{p.x, p.y};
     ObsRecord myObs(cloudMsg->header.seq, vectorOfTrees, localCloud);
 
     // Try to match the current frame with any that have been associated with a base frame
@@ -136,7 +137,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // Match (current frame --> associated frame) until match found
         auto revKfIter = kfObs.rbegin();
         do {
-            pointMatchIndices = matchObsIdx(myObs.obs, revKfIter->obs, 5, 1.5);
+            pointMatchIndices = matchObsIdx(myObs.obs, revKfIter->obs, polygonMatchThresh, validPointMatchThresh);
         } while (pointMatchIndices.size() < 2 && ++revKfIter != kfObs.rend());
 
         // Store observation data
@@ -151,7 +152,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             // Try to match all unassociated observations with the current observation
             auto obsIter = unassociatedObs.begin();
             while (obsIter != unassociatedObs.end()) {
-                pointMatchIndices = matchObsIdx(obsIter->obs, myObs.obs, 5, 1.5);
+                pointMatchIndices = matchObsIdx(obsIter->obs, myObs.obs, polygonMatchThresh, validPointMatchThresh);
                 if (pointMatchIndices.size() >= 2) {
                     if (isDebug) std::cout << "Also matched with frame " << obsIter->frameId << std::endl;
                     tfCloud(myObs.tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, obsIter->obs, myObs.obs), *obsIter);
@@ -168,7 +169,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // Match (current frame --> latest unassociated frame) until match found
         auto revIter = unassociatedObs.rbegin();
         do {
-            pointMatchIndices = matchObsIdx(myObs.obs, revIter->obs, 5, 1.5);
+            pointMatchIndices = matchObsIdx(myObs.obs, revIter->obs, polygonMatchThresh, validPointMatchThresh);
         } while (pointMatchIndices.size() < 2 && ++revIter != unassociatedObs.rend());
 
         // Store observation data
@@ -191,7 +192,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
             // For every remaining unassociated observation, try to match with the current observation
             while (revIter != unassociatedObs.rend()) {
-                pointMatchIndices = matchObsIdx(revIter->obs, myObs.obs, 5, 1.5);
+                pointMatchIndices = matchObsIdx(revIter->obs, myObs.obs, polygonMatchThresh, validPointMatchThresh);
                 if (pointMatchIndices.size() >= 2) {
                     if (isDebug) std::cout << "Including frame " << revIter->frameId << " in the association." << std::endl;
                     tfCloud(myObs.tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, revIter->obs, myObs.obs), *revIter);
@@ -231,7 +232,8 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // Combine them --> do standard clustering/point association
         pcl::EuclideanClusterExtraction<pcl::PointXYZ> ece;
         ece.setInputCloud(bigPcPtr);
-        ece.setClusterTolerance(0.1); // Set the spatial cluster tolerance (in meters)
+        // ece.setClusterTolerance(0.1); // Set the spatial cluster tolerance (in meters)
+        ece.setClusterTolerance(0.2); // Set the spatial cluster tolerance (in meters)
         ece.setMinClusterSize(1);
         ece.setMaxClusterSize(maxKeyframeWidth);
         std::vector<pcl::PointIndices> cluster_indices;
@@ -272,9 +274,13 @@ int main(int argc, char **argv) {
     // Initialize Node and read in private parameters
     ros::init(argc, argv, "keyframe_maker");
     ros::NodeHandle n("~");
+    
     isDebug = n.param("debug", true);
     maxKeyframeWidth = n.param("maxKeyframeWidth", 5);
     numSkippedFramesBeforeSend = n.param("numSkippedFramesBeforeSend", 3);
+    polygonMatchThresh = n.param("polygonMatchThresh", 3);
+    validPointMatchThresh = n.param("validPointMatchThresh", 3);
+    clusterTolerance = n.param("clusterTolerance", 0.1);
 
     ros::Subscriber sub = n.subscribe("/sim_path/local_points", 10, parse2DPC);
     kfpub = n.advertise<sensor_msgs::PointCloud2>("keyframe", 10);

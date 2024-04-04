@@ -126,7 +126,7 @@ def draw_trees_hack(data: pc2.PointCloud2):
 
     # get pose
 
-    grX, grY, grT = tuple(map(float, data.header.frame_id.split(' ')))
+    grX, grY, grT, numTrees = tuple(map(float, data.header.frame_id.split(' ')))
     
     # plot pose related stuff
     if cx is not None:
@@ -135,8 +135,11 @@ def draw_trees_hack(data: pc2.PointCloud2):
     fig.gca().plot(grX, grY, 'b', marker=(3, 0, 180*grT/np.pi)) # expects degrees
 
     # Set plot boundaries
-    fig.gca().set_xlim(grX-obsRange,grX+obsRange)
-    fig.gca().set_ylim(grY-obsRange,grY+obsRange)
+    view_range = obsRange*1.5
+    fig.gca().set_xlim(grX-view_range,grX+view_range)
+    fig.gca().set_ylim(grY-view_range,grY+view_range)
+
+    fig.gca().set_title(f"{int(numTrees)} trees observed")
 
 
     plt.draw()
@@ -183,7 +186,7 @@ def listener():
     rospy.Subscriber("/sim_path/global_points", pc2.PointCloud2, draw_trees_hack)
     # rospy.Subscriber("/sim_path/global_points", pc2.PointCloud2, draw_trees)
     # rospy.Subscriber("/sim_path/global_pose", Pose2D, update_pose)
-    obsRange = rospy.get_param("/sim_path/observationRange", obsRange) * 1.5
+    obsRange = rospy.get_param("/sim_path/observationRange", obsRange) #* 1.5
     cW = rospy.get_param("/sim_path/collisionRadius", 0)
 
     ox, oy = obsRange*cos, obsRange*sin

@@ -170,9 +170,11 @@ int main(int argc, char **argv)
             numFrames = nextObs.id;
             if (isDebug) ROS_INFO("%d", numFrames);
 
-            // Publish data in ROS
-            std::string globalPoseHack = nextObs.globalPose.printPose();
+            // global observation visualization hack
+            std::string globalPoseHack = nextObs.globalPose.printPose() + " " + std::to_string(nextObs.localTreePositions.size());
+            // NOTE: apparently PCL overwrites "seq" in message header...
             publishObservation(gpPub, nextObs.globalTreePositions, nextObs.id, globalPoseHack);
+            // Publish data in ROS
             // publishObservation(gpPub, nextObs.globalTreePositions, nextObs.id, "global_frame");
             publishObservation(lpPub, nextObs.localTreePositions, nextObs.id, "sensor_frame");
             geometry_msgs::Pose2D gP;

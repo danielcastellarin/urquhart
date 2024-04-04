@@ -18,6 +18,9 @@ keyframe_maker:
   debug: true
   maxKeyframeWidth: 5
   numSkippedFramesBeforeSend: 3
+  polygonMatchThresh: 3
+  validPointMatchThresh: 1
+  clusterTolerance: 0.01
 
 graph_builder:
   outputDirName: GSLAM_sc

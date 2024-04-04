@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+    <rosparam file="$(find urquhart)/run_configs/geoSLAM/std.yaml" command="load" />
+    
+    <!-- Simulate robot observations -->
+    <node pkg="urquhart" type="ultimate_path" name="sim_path" output="screen" />
+    <node pkg="urquhart" type="live_truth_display.py" name="truth_display" output="screen" />
+
+    <!-- Local Bundle Adjustment Node -->
+    <node pkg="urquhart" type="KeyframeGen" name="keyframe_maker" output="screen" />
+    <node pkg="urquhart" type="live_keyframe_display.py" name="kf_display" output="screen" />
+</launch>

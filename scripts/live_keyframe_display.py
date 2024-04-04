@@ -57,19 +57,18 @@ from matplotlib.patches import ConnectionPatch
 # plt.show()
 numFrames = 0
 fig=plt.figure()
-obsRange = 30
 
 
 def callback(data: pc2.PointCloud2):
     global numFrames
     fig.clf()
     
-#     # kfs.append([p for p in pc2.read_points(data, field_names=("x", "y"))])
-    for x,y in pc2.read_points(data, field_names=("x", "y")): fig.gca().plot(x, y, 'ro')
-    fig.gca().set_xlim(-obsRange,obsRange)
-    fig.gca().set_ylim(-obsRange,obsRange)
+    numTrees = 0
+    for x,y in pc2.read_points(data, field_names=("x", "y")): 
+        fig.gca().plot(x, y, 'ro')
+        numTrees += 1
 
-    fig.gca().set_title(f"Keyframe ID: {data.header.seq}")
+    fig.gca().set_title(f"Keyframe ID: {data.header.seq} | Trees: {numTrees}")
     plt.draw()
     numFrames += 1
 
@@ -81,7 +80,6 @@ def listener():
     global obsRange
     rospy.init_node('kf_display')
     rospy.Subscriber("/keyframe_maker/keyframe", pc2.PointCloud2, callback)
-    obsRange = rospy.get_param("/sim_path/observationRange", obsRange) * 1.25
 
     # plt.ion()
     # plt.show(block=False)
