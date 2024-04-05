@@ -37,11 +37,21 @@ void Observation::computeHierarchy() {
     urquhartTesselation();
 }
 
-void Observation::recomputeEdgeLengths() {
+void Observation::recomputeEdgeLengthsAndDescriptors() {
+    // Recompute all polygon descriptors once
     for (Eigen::Index i = 0; i < triangulationEdges.cols(); ++i) {
         triangulationEdgeLengths(i) = euclideanDistance2D(landmarks.col(triangulationEdges(0, i)), landmarks.col(triangulationEdges(1, i)));
     }
-    // TODO probably should recompute each polygon's descriptors too
+
+    // Recompute all polygon descriptors once
+    for (const auto& pIdx : hier->getChildrenIds(0)) {  // Iterate over polygons
+        hier->getPolygon(pIdx).recomputeDescriptor(landmarks, triangulationEdgeLengths);
+        if (hier->getPolygon(pIdx).n > 3) {
+            for (const auto& tIdx : hier->getChildrenIds(pIdx)) {   // Iterate over triangles
+                hier->getPolygon(tIdx).recomputeDescriptor(landmarks, triangulationEdgeLengths);
+            }
+        }
+    }
 }
 
 

@@ -47,6 +47,10 @@ namespace urquhart {
                 descriptor = poly_desc::compute(pRefs, eRefs, ldmks, eLens);
             }
 
+            void recomputeDescriptor(const Points& ldmks, const Eigen::VectorXd& eLens) {
+                descriptor = poly_desc::compute(landmarkRefs, edgeRefs, ldmks, eLens);
+            }
+
             // Reverse the elements of this polygon.
             // Executed when disagreeing with the direction of another polygon that is initiating a merge
             void reverse() {  

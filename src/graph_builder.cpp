@@ -624,7 +624,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             g.geoHier->computeHierarchy();
         } else {
             if (isDebug) std::cout << "Recomputing edge lengths." << std::endl;
-            g.geoHier->recomputeEdgeLengths();
+            g.geoHier->recomputeEdgeLengthsAndDescriptors();
         }
         
         
@@ -716,9 +716,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
 // TODO increase matching iteration count
 // implement alternate association view in visualization
-// ensure polygon descriptors are recomputed when recomputeEdgeLengths is called
 // play with polygon matching algorithm to be not greedy
-// Implement strictor landmark matching check in keyframe constructor
+// Implement more strict landmark-matching check in keyframe constructor
 // TODO consolidate logging to single directory for all nodes in pipeline
 
 

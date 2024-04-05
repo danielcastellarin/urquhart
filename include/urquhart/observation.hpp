@@ -23,7 +23,7 @@ namespace urquhart {
             void view();
 
             void computeHierarchy();
-            void recomputeEdgeLengths();
+            void recomputeEdgeLengthsAndDescriptors();
 
             // Storage for the positions of all landmarks in this observation (one per column)
             // All polygons store references to these values
