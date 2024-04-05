@@ -718,7 +718,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 // implement alternate association view in visualization
 // ensure polygon descriptors are recomputed when recomputeEdgeLengths is called
 // play with polygon matching algorithm to be not greedy
-// Investigate eigen error in keyframe code, might be related to the arrogant distance check?
+// Implement strictor landmark matching check in keyframe constructor
 
 
 int main(int argc, char **argv) {

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <launch>
-    <rosparam file="$(find urquhart)/run_configs/geoSLAM/std.yaml" command="load" />
+    <rosparam file="$(find urquhart)/run_configs/geoSLAM/config_that_works.yaml" command="load" />
     
     <!-- Simulate robot observations -->
     <node pkg="urquhart" type="ultimate_path" name="sim_path" output="screen" />
