@@ -467,8 +467,7 @@ void findBestMatches(const Points& localLandmarks, const Points& globalLandmarks
 }
 
 
-ros::Publisher polyPub, triPub, ptPub;
-ros::Publisher graphPub;
+ros::Publisher graphPub, hierPub;
 
 
 SLAMGraph g;
@@ -722,50 +721,38 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     }
 
     if (pyPub) {
-        // TODO worst-case if python isn't catching the frames in time, stuff it all in one message
-
-        std::stringstream polyStream, triStream, ptStream;
-        polyStream << g.poseNodeList.size() << "!";
-        triStream << g.poseNodeList.size() << "!";
-        ptStream << g.poseNodeList.size() << "!";
+        std::stringstream polyStream, triStream, ptStream, hierStream;
+        hierStream << g.poseNodeList.size() << "!";
         
         // Iterate over the indices of the Polygons in the hierarchy
+        int j = 0, k = 0;
         for (auto pIdx : g.geoHier->hier->getChildrenIds(0)) {
+            polyStream << (j++!=0 ? "|": "");
             for (int i = 0; i < g.geoHier->hier->getPolygon(pIdx).landmarkRefs.size(); ++i) {
                 auto myPoint = g.geoHier->landmarks.col(g.geoHier->hier->getPolygon(pIdx).landmarkRefs(i));
-                polyStream << (i!=0 ? "|": "") << myPoint[0] << " " << myPoint[1];
+                polyStream << (i!=0 ? ":": "") << myPoint[0] << " " << myPoint[1];
             }
-            polyStream << ":";
             
             // Iterate over the indices of the Triangles that compose this Polygon
             for (auto tIdx : g.geoHier->hier->getChildrenIds(pIdx)) {
-                // Retain only the Polygon objects that have three sides
-                if (g.geoHier->hier->getPolygon(tIdx).n == 3) {
-                    for (int i = 0; i < g.geoHier->hier->getPolygon(tIdx).landmarkRefs.size(); ++i) {
-                        auto myPoint = g.geoHier->landmarks.col(g.geoHier->hier->getPolygon(tIdx).landmarkRefs(i));
-                        triStream << (i!=0 ? "|": "") << myPoint[0] << " " << myPoint[1];
-                    }
-                    triStream << ":";
+                triStream << (k++!=0 ? "|": "");
+                for (int i = 0; i < g.geoHier->hier->getPolygon(tIdx).landmarkRefs.size(); ++i) {
+                    auto myPoint = g.geoHier->landmarks.col(g.geoHier->hier->getPolygon(tIdx).landmarkRefs(i));
+                    triStream << (i!=0 ? ":": "") << myPoint[0] << " " << myPoint[1];
                 }
             }
         }
 
-        int i = 0;
+        j = 0;
         for (const PtLoc& ldmk : g.geoHier->landmarks.colwise()) {
-            ptStream << (i++ != 0 ? "|": "") << ldmk(0) << " " << ldmk(1);
+            ptStream << (j++ != 0 ? ":": "") << ldmk(0) << " " << ldmk(1);
         }
-        
-        
-        // Construct message from string streams
-        std_msgs::String polyMsg, triMsg, ptsMsg;
-        polyMsg.data = polyStream.str();
-        triMsg.data = triStream.str();
-        ptsMsg.data = ptStream.str();
 
-        // Publish messages
-        polyPub.publish(polyMsg);
-        triPub.publish(triMsg);
-        ptPub.publish(ptsMsg);
+        // Construct message from string streams and publish
+        std_msgs::String hierMsg;
+        hierStream << polyStream.str() << "$" << triStream.str() << "$" << ptStream.str();
+        hierMsg.data = hierStream.str();
+        hierPub.publish(hierMsg);
     }
 
 }
@@ -819,9 +806,7 @@ int main(int argc, char **argv) {
 
     
     ros::Subscriber sub = n.subscribe("/keyframe_maker/keyframe", 10, constructGraph);
-    polyPub = n.advertise<std_msgs::String>("polygons", 10);
-    triPub = n.advertise<std_msgs::String>("triangles", 10);
-    ptPub = n.advertise<std_msgs::String>("points", 10);
+    hierPub = n.advertise<std_msgs::String>("hierarchy", 10);
     graphPub = n.advertise<std_msgs::String>("graph", 10);
     
 

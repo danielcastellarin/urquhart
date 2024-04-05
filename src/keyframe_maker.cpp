@@ -31,8 +31,7 @@ struct ObsRecord {
 };
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr bigPcPtr(new pcl::PointCloud<pcl::PointXYZ>());
-ros::Publisher kfpub, bigCloudPub;
-ros::Publisher polyPub, triPub, ptPub;
+ros::Publisher kfpub, bigCloudPub, hierPub;
 
 std::vector<ObsRecord> unassociatedObs;
 std::set<ObsRecord> kfObs;
@@ -223,51 +222,40 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         if (isDebug) std::cout << "Initializing unassociated observations at frame " << myObs.frameId << std::endl;
     }
 
+    // Publish geometric hierarchy for the input frame (if desired)
     if (isIndivFramePub) {
-        // TODO worst-case if python isn't catching the frames in time, stuff it all in one message
-
-        std::stringstream polyStream, triStream, ptStream;
-        polyStream << myObs.frameId << "!";
-        triStream << myObs.frameId << "!";
-        ptStream << myObs.frameId << "!";
+        std::stringstream polyStream, triStream, ptStream, hierStream;
+        hierStream << myObs.frameId << "!";
         
         // Iterate over the indices of the Polygons in the hierarchy
+        int j = 0, k = 0;
         for (auto pIdx : myObs.obs.hier->getChildrenIds(0)) {
+            polyStream << (j++!=0 ? "|": "");
             for (int i = 0; i < myObs.obs.hier->getPolygon(pIdx).landmarkRefs.size(); ++i) {
                 auto myPoint = myObs.obs.landmarks.col(myObs.obs.hier->getPolygon(pIdx).landmarkRefs(i));
-                polyStream << (i!=0 ? "|": "") << myPoint[0] << " " << myPoint[1];
+                polyStream << (i!=0 ? ":": "") << myPoint[0] << " " << myPoint[1];
             }
-            polyStream << ":";
             
             // Iterate over the indices of the Triangles that compose this Polygon
             for (auto tIdx : myObs.obs.hier->getChildrenIds(pIdx)) {
-                // Retain only the Polygon objects that have three sides
-                if (myObs.obs.hier->getPolygon(tIdx).n == 3) {
-                    for (int i = 0; i < myObs.obs.hier->getPolygon(tIdx).landmarkRefs.size(); ++i) {
-                        auto myPoint = myObs.obs.landmarks.col(myObs.obs.hier->getPolygon(tIdx).landmarkRefs(i));
-                        triStream << (i!=0 ? "|": "") << myPoint[0] << " " << myPoint[1];
-                    }
-                    triStream << ":";
+                triStream << (k++!=0 ? "|": "");
+                for (int i = 0; i < myObs.obs.hier->getPolygon(tIdx).landmarkRefs.size(); ++i) {
+                    auto myPoint = myObs.obs.landmarks.col(myObs.obs.hier->getPolygon(tIdx).landmarkRefs(i));
+                    triStream << (i!=0 ? ":": "") << myPoint[0] << " " << myPoint[1];
                 }
             }
         }
 
-        int i = 0;
+        j = 0;
         for (const PtLoc& ldmk : myObs.obs.landmarks.colwise()) {
-            ptStream << (i++ != 0 ? "|": "") << ldmk(0) << " " << ldmk(1);
+            ptStream << (j++ != 0 ? ":": "") << ldmk(0) << " " << ldmk(1);
         }
-        
-        
-        // Construct message from string streams
-        std_msgs::String polyMsg, triMsg, ptsMsg;
-        polyMsg.data = polyStream.str();
-        triMsg.data = triStream.str();
-        ptsMsg.data = ptStream.str();
 
-        // Publish messages
-        polyPub.publish(polyMsg);
-        triPub.publish(triMsg);
-        ptPub.publish(ptsMsg);
+        // Construct message from string streams and publish
+        std_msgs::String hierMsg;
+        hierStream << polyStream.str() << "$" << triStream.str() << "$" << ptStream.str();
+        hierMsg.data = hierStream.str();
+        hierPub.publish(hierMsg);
     }
 
     // std::cout << "Unassociated: ";
@@ -296,8 +284,8 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // Combine them --> do standard clustering/point association
         pcl::EuclideanClusterExtraction<pcl::PointXYZ> ece;
         ece.setInputCloud(bigPcPtr);
-        ece.setClusterTolerance(clusterTolerance); // Set the spatial cluster tolerance (in meters)
-        ece.setMinClusterSize(2);
+        ece.setClusterTolerance(clusterTolerance);  // Set the spatial cluster tolerance (in meters)
+        ece.setMinClusterSize(2);                   // Don't make a cluster for a single stray point 
         ece.setMaxClusterSize(maxKeyframeWidth);
         std::vector<pcl::PointIndices> cluster_indices;
         ece.extract(cluster_indices);
@@ -356,11 +344,7 @@ int main(int argc, char **argv) {
     kfpub = n.advertise<sensor_msgs::PointCloud2>("keyframe", 10);
     bigCloudPub = n.advertise<sensor_msgs::PointCloud2>("allPoints", 10);
 
-    if (isIndivFramePub) {
-        polyPub = n.advertise<std_msgs::String>("polygons", 10);
-        triPub = n.advertise<std_msgs::String>("triangles", 10);
-        ptPub = n.advertise<std_msgs::String>("points", 10);
-    }
+    if (isIndivFramePub) hierPub = n.advertise<std_msgs::String>("hierarchy", 10);
 
     ros::spin();
 
