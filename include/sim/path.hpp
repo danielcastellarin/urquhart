@@ -42,9 +42,9 @@ struct SimConfig
         treeAssociationThreshold = nh.param("treeAssociationThreshold", 0.5);   // should be smaller than landmark association thresh
 
         // Optional parameters
-        successfulObservationProbability = nh.param("successfulObservationProbability", 1);
-        treePositionStandardDeviation = nh.param("treePositionStandardDeviation", 0);
-        treeRadiusStandardDeviation = nh.param("treeRadiusStandardDeviation", 0);
+        successfulObservationProbability = nh.param("successfulObservationProbability", 1.0);
+        treePositionStandardDeviation = nh.param("treePositionStandardDeviation", 0.0);
+        treeRadiusStandardDeviation = nh.param("treeRadiusStandardDeviation", 0.0);
         if (nh.hasParam("startPoseX") && nh.hasParam("startPoseY") && nh.hasParam("startPoseTheta")) {
             double x, y, theta;
             nh.getParam("startPoseX", x), nh.getParam("startPoseY", y), nh.getParam("startPoseTheta", theta);

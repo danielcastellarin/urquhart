@@ -55,20 +55,25 @@ from matplotlib.patches import ConnectionPatch
 # draw_vis()
 # print('Press left and right to view different frames. Press "escape" to exit')
 # plt.show()
+
+
 numFrames = 0
 fig=plt.figure()
+topicName = ""
 
 
 def callback(data: pc2.PointCloud2):
     global numFrames
     fig.clf()
     
+    # Read and count points in the cloud
     numTrees = 0
     for x,y in pc2.read_points(data, field_names=("x", "y")): 
         fig.gca().plot(x, y, 'ro')
         numTrees += 1
 
-    fig.gca().set_title(f"Keyframe ID: {data.header.seq} | Trees: {numTrees}")
+    # Set title and update figure
+    fig.gca().set_title(f"{topicName} | Keyframe ID: {data.header.seq} | Trees: {numTrees}")
     plt.draw()
     numFrames += 1
 
@@ -77,17 +82,19 @@ def callback(data: pc2.PointCloud2):
 ################
 
 def listener():
-    global obsRange
-    rospy.init_node('kf_display')
-    rospy.Subscriber("/keyframe_maker/keyframe", pc2.PointCloud2, callback)
-    # rospy.Subscriber("/keyframe_maker/allPoints", pc2.PointCloud2, callback)
+    global topicName
+    rospy.init_node('pc_display')
 
+    # Get topic of pointcloud to display
+    topicName = rospy.get_param('~topicName')
+    rospy.Subscriber(topicName, pc2.PointCloud2, callback)
+
+    # Open figure window until finished
     # plt.ion()
-    # plt.show(block=False)
     plt.show()
     rospy.spin()
 
-
+    # Cleanup
     plt.close()
     print(f"Number of frames seen: {numFrames}")
 

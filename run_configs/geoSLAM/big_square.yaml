@@ -1,0 +1,32 @@
+sim_path:
+  forestFile: coolForest.txt    # local from 'urquhart' package
+  pathType: square
+  distanceToTravel: 400
+  distanceBetweenObservations: 0.2
+  observationRange: 40
+  collisionRadius: 0.3
+  successfulObservationProbability: 0.95
+  treePositionStandardDeviation: 0.1
+  # landmarkAssociationThreshold: 0.8
+  # treeAssociationThreshold: 0.5
+  pubRate: 0.5
+  outputDirName: serious_square
+  randomSeed: 16
+  debug: false
+
+keyframe_maker:
+  debug: false
+  indivFramePub: true
+  maxKeyframeWidth: 5
+  numSkippedFramesBeforeSend: 3
+  polygonMatchThresh: 3
+  validPointMatchThresh: 0.75
+  clusterTolerance: 0.01
+
+graph_builder:
+  outputDirName: GSLAM_ss
+  debug: false
+  output: false
+  pyPub: true
+  polyMatchThreshStart: 0.5
+  polyMatchThreshStep: 0.25

@@ -15,6 +15,7 @@
 #include <pcl/common/centroid.h>
 #include <pcl/segmentation/extract_clusters.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <std_msgs/String.h>
 #include <ros/ros.h>
 
 
@@ -31,10 +32,11 @@ struct ObsRecord {
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr bigPcPtr(new pcl::PointCloud<pcl::PointXYZ>());
 ros::Publisher kfpub, bigCloudPub;
+ros::Publisher polyPub, triPub, ptPub;
 
 std::vector<ObsRecord> unassociatedObs;
 std::set<ObsRecord> kfObs;
-bool isDebug;
+bool isDebug, isIndivFramePub;
 int maxKeyframeWidth, numSkippedFramesBeforeSend;
 double polygonMatchThresh, validPointMatchThresh, clusterTolerance;
 
@@ -221,6 +223,53 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         if (isDebug) std::cout << "Initializing unassociated observations at frame " << myObs.frameId << std::endl;
     }
 
+    if (isIndivFramePub) {
+        // TODO worst-case if python isn't catching the frames in time, stuff it all in one message
+
+        std::stringstream polyStream, triStream, ptStream;
+        polyStream << myObs.frameId << "!";
+        triStream << myObs.frameId << "!";
+        ptStream << myObs.frameId << "!";
+        
+        // Iterate over the indices of the Polygons in the hierarchy
+        for (auto pIdx : myObs.obs.hier->getChildrenIds(0)) {
+            for (int i = 0; i < myObs.obs.hier->getPolygon(pIdx).landmarkRefs.size(); ++i) {
+                auto myPoint = myObs.obs.landmarks.col(myObs.obs.hier->getPolygon(pIdx).landmarkRefs(i));
+                polyStream << (i!=0 ? "|": "") << myPoint[0] << " " << myPoint[1];
+            }
+            polyStream << ":";
+            
+            // Iterate over the indices of the Triangles that compose this Polygon
+            for (auto tIdx : myObs.obs.hier->getChildrenIds(pIdx)) {
+                // Retain only the Polygon objects that have three sides
+                if (myObs.obs.hier->getPolygon(tIdx).n == 3) {
+                    for (int i = 0; i < myObs.obs.hier->getPolygon(tIdx).landmarkRefs.size(); ++i) {
+                        auto myPoint = myObs.obs.landmarks.col(myObs.obs.hier->getPolygon(tIdx).landmarkRefs(i));
+                        triStream << (i!=0 ? "|": "") << myPoint[0] << " " << myPoint[1];
+                    }
+                    triStream << ":";
+                }
+            }
+        }
+
+        int i = 0;
+        for (const PtLoc& ldmk : myObs.obs.landmarks.colwise()) {
+            ptStream << (i++ != 0 ? "|": "") << ldmk(0) << " " << ldmk(1);
+        }
+        
+        
+        // Construct message from string streams
+        std_msgs::String polyMsg, triMsg, ptsMsg;
+        polyMsg.data = polyStream.str();
+        triMsg.data = triStream.str();
+        ptsMsg.data = ptStream.str();
+
+        // Publish messages
+        polyPub.publish(polyMsg);
+        triPub.publish(triMsg);
+        ptPub.publish(ptsMsg);
+    }
+
     // std::cout << "Unassociated: ";
     // for (auto g : unassociatedObs) {
     //     std::cout << g.frameId << ", ";
@@ -292,6 +341,8 @@ int main(int argc, char **argv) {
     ros::NodeHandle n("~");
 
     isDebug = n.param("debug", true);
+    isIndivFramePub = n.param("indivFramePub", false);
+
     maxKeyframeWidth = n.param("maxKeyframeWidth", 5);
     numSkippedFramesBeforeSend = n.param("numSkippedFramesBeforeSend", 3);
     polygonMatchThresh = n.param("polygonMatchThresh", 3);
@@ -301,6 +352,12 @@ int main(int argc, char **argv) {
     ros::Subscriber sub = n.subscribe("/sim_path/local_points", 10, parse2DPC);
     kfpub = n.advertise<sensor_msgs::PointCloud2>("keyframe", 10);
     bigCloudPub = n.advertise<sensor_msgs::PointCloud2>("allPoints", 10);
+
+    if (isIndivFramePub) {
+        polyPub = n.advertise<std_msgs::String>("polygons", 10);
+        triPub = n.advertise<std_msgs::String>("triangles", 10);
+        ptPub = n.advertise<std_msgs::String>("points", 10);
+    }
 
     ros::spin();
 

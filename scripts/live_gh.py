@@ -103,10 +103,11 @@ def read_points(data: String):
 ################
 
 def listener():
-    rospy.init_node('global_display')
-    rospy.Subscriber("/graph_builder/polygons", String, read_polygons)
-    rospy.Subscriber("/graph_builder/triangles", String, read_triangles)
-    rospy.Subscriber("/graph_builder/points", String, read_points)
+    # NOTE: namespace should be set externally
+    rospy.init_node('gh_display')
+    rospy.Subscriber("polygons", String, read_polygons)
+    rospy.Subscriber("triangles", String, read_triangles)
+    rospy.Subscriber("points", String, read_points)
     # obsRange = rospy.get_param("/sim_path/observationRange", obsRange) * 1.25
 
     # plt.ion()

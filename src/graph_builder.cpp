@@ -719,6 +719,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 // ensure polygon descriptors are recomputed when recomputeEdgeLengths is called
 // play with polygon matching algorithm to be not greedy
 // Implement strictor landmark matching check in keyframe constructor
+// TODO consolidate logging to single directory for all nodes in pipeline
 
 
 int main(int argc, char **argv) {
