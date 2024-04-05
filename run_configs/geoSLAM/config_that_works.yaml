@@ -9,14 +9,14 @@ sim_path:
   treePositionStandardDeviation: 0.1
   # landmarkAssociationThreshold: 0.8
   # treeAssociationThreshold: 0.5
-  pubRate: 1
+  pubRate: 0.5
   outputDirName: serious_circle
   randomSeed: 17
   debug: false
 
 keyframe_maker:
   debug: false
-  indivFramePub: true
+  indivFramePub: false
   maxKeyframeWidth: 5
   numSkippedFramesBeforeSend: 3
   polygonMatchThresh: 3
