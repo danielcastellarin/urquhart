@@ -7,25 +7,25 @@ sim_path:
   collisionRadius: 0.3
   successfulObservationProbability: 0.95
   treePositionStandardDeviation: 0.1
-  landmarkAssociationThreshold: 0.8
-  treeAssociationThreshold: 0.5
+  # landmarkAssociationThreshold: 0.8
+  # treeAssociationThreshold: 0.5
   pubRate: 5
   outputDirName: serious_circle
   randomSeed: 17
   debug: false
 
 keyframe_maker:
-  debug: true
+  debug: false
   maxKeyframeWidth: 5
   numSkippedFramesBeforeSend: 3
   polygonMatchThresh: 3
   validPointMatchThresh: 0.75
-  clusterTolerance: 0.01
+  clusterTolerance: 0.3
 
 graph_builder:
   outputDirName: GSLAM_sc
-  debug: false
+  debug: true
   output: true
   pyPub: true
-  polyMatchThreshStart: 0.5
-  polyMatchThreshStep: 0.25
+  polyMatchThreshStart: 1.0
+  polyMatchThreshStep: 0.5

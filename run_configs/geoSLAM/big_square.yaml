@@ -15,13 +15,13 @@ sim_path:
   debug: false
 
 keyframe_maker:
-  debug: false
+  debug: true
   indivFramePub: true
   maxKeyframeWidth: 5
   numSkippedFramesBeforeSend: 3
   polygonMatchThresh: 3
   validPointMatchThresh: 0.75
-  clusterTolerance: 0.01
+  clusterTolerance: 0.3
 
 graph_builder:
   outputDirName: GSLAM_ss

@@ -100,20 +100,20 @@ Eigen::Matrix4d computeRigid2DEuclidTfFromIndices(const std::vector<std::pair<Ei
     return tf;
 }
 
-std::vector<std::pair<Eigen::Index, Eigen::Index>> matchObsIdx(const urquhart::Observation &ref, const urquhart::Observation &targ, double polyMatchThresh, double validPointMatchThresh) {
+std::vector<std::pair<Eigen::Index, Eigen::Index>> matchObsIdx(const urquhart::Observation &ref, const urquhart::Observation &targ, double polyMatchThresh, double pointMatchThresh) {
 
     // Perform traditional data association 
     std::vector<std::pair<Eigen::Index, Eigen::Index>> finalVertexMatches, vertexMatches = matching::hierarchyIndexMatching(ref, targ, polyMatchThresh);
 
     // Post-process: double-check matches, remove any where pairs are beyond a certain distance from each other
     // for (auto iter = vertexMatches.begin(); iter != vertexMatches.end(); ++iter) {
-    //     if (std::abs(ref.ldmkX(iter->first) - targ.ldmkX(iter->second)) > validPointMatchThresh || std::abs(ref.ldmkY(iter->first) - targ.ldmkY(iter->second)) > validPointMatchThresh)
-    //     // if (((ref.landmarks.col(iter->first) - targ.landmarks.col(iter->second)).array().abs() > validPointMatchThresh).any())
+    //     if (std::abs(ref.ldmkX(iter->first) - targ.ldmkX(iter->second)) > pointMatchThresh || std::abs(ref.ldmkY(iter->first) - targ.ldmkY(iter->second)) > pointMatchThresh)
+    //     // if (((ref.landmarks.col(iter->first) - targ.landmarks.col(iter->second)).array().abs() > pointMatchThresh).any())
     //         vertexMatches.erase(iter);
     // }
     // arrogance check: if matched points across differential observations are not very close, then the match is probably wrong
     for (const auto& [refIdx, targIdx] : vertexMatches) {
-        if (((ref.landmarks.col(refIdx) - targ.landmarks.col(targIdx)).array().abs() < validPointMatchThresh).all())
+        if (((ref.landmarks.col(refIdx) - targ.landmarks.col(targIdx)).array().abs() < pointMatchThresh).all())
             finalVertexMatches.push_back({refIdx, targIdx});
     }
 
@@ -296,8 +296,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // Combine them --> do standard clustering/point association
         pcl::EuclideanClusterExtraction<pcl::PointXYZ> ece;
         ece.setInputCloud(bigPcPtr);
-        // ece.setClusterTolerance(0.1); // Set the spatial cluster tolerance (in meters)
-        ece.setClusterTolerance(0.02); // Set the spatial cluster tolerance (in meters)
+        ece.setClusterTolerance(clusterTolerance); // Set the spatial cluster tolerance (in meters)
         ece.setMinClusterSize(2);
         ece.setMaxClusterSize(maxKeyframeWidth);
         std::vector<pcl::PointIndices> cluster_indices;
@@ -340,13 +339,17 @@ int main(int argc, char **argv) {
     ros::init(argc, argv, "keyframe_maker");
     ros::NodeHandle n("~");
 
+    // booleans
     isDebug = n.param("debug", true);
     isIndivFramePub = n.param("indivFramePub", false);
 
+    // integers
     maxKeyframeWidth = n.param("maxKeyframeWidth", 5);
     numSkippedFramesBeforeSend = n.param("numSkippedFramesBeforeSend", 3);
-    polygonMatchThresh = n.param("polygonMatchThresh", 3);
-    validPointMatchThresh = n.param("validPointMatchThresh", 3);
+
+    // doubles
+    polygonMatchThresh = n.param("polygonMatchThresh", 3.0);
+    validPointMatchThresh = n.param("validPointMatchThresh", 1.0);
     clusterTolerance = n.param("clusterTolerance", 0.1);
 
     ros::Subscriber sub = n.subscribe("/sim_path/local_points", 10, parse2DPC);

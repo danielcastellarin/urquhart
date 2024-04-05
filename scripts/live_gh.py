@@ -110,6 +110,8 @@ def listener():
     rospy.Subscriber("points", String, read_points)
     # obsRange = rospy.get_param("/sim_path/observationRange", obsRange) * 1.25
 
+    fig.canvas.set_window_title(f"Geometric Hierarchy")
+
     # plt.ion()
     # plt.show(block=False)
     plt.show()

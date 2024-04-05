@@ -731,8 +731,8 @@ int main(int argc, char **argv) {
     isDebug = n.param("debug", true);
     isOutput = n.param("output", true);
     pyPub = n.param("pyPub", false);
-    polyMatchThresh = n.param("polyMatchThreshStart", 5);
-    polyMatchThreshStep = n.param("polyMatchThreshStep", 1);
+    polyMatchThresh = n.param("polyMatchThreshStart", 5.0);
+    polyMatchThreshStep = n.param("polyMatchThreshStep", 1.0);
     n.param<std::string>("outputDirName", outputPath, "gTEST");
 
 

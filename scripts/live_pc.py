@@ -89,6 +89,8 @@ def listener():
     topicName = rospy.get_param('~topicName')
     rospy.Subscriber(topicName, pc2.PointCloud2, callback)
 
+    fig.canvas.set_window_title(f"Points from {topicName}")
+
     # Open figure window until finished
     # plt.ion()
     plt.show()
