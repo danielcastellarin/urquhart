@@ -30,4 +30,5 @@
     <group ns="graph_builder">
         <node pkg="urquhart" type="live_gh.py" name="gh_display" output="screen" />
     </group>
+    <node pkg="urquhart" type="live_graph.py" name="graph_display" output="screen" />
 </launch>

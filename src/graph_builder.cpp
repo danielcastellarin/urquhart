@@ -211,7 +211,6 @@ struct SLAMGraph {
         return ldmkIdx;
     }
     void addPLEdge(Eigen::Index globalLandmarkIdx, const PtLoc& landmarkLocalPosition) {
-        // Precondition: landmark data must already be in geometric hierarchy at the given index 
         // Precondition: landmark node must already be in the graph's list of nodes
         
         // May be called with landmark nodes that existed before current keyframe or nodes that were just created
@@ -469,6 +468,7 @@ void findBestMatches(const Points& localLandmarks, const Points& globalLandmarks
 
 
 ros::Publisher polyPub, triPub, ptPub;
+ros::Publisher graphPub;
 
 
 SLAMGraph g;
@@ -518,8 +518,31 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         if (isDebug) {
             std::cout << "Constructed initial global geometric hierarchy " << cloudMsg->header.seq << std::endl;
-            std::cout << "Initial tree positions:\n" << localObs.landmarks.transpose() << std::endl;
+            // std::cout << "Initial tree positions:\n" << localObs.landmarks.transpose() << std::endl;
+            std::cout << "Number of initial trees: " << localObs.landmarks.cols() << std::endl;
         }
+
+        // Publish initial graph state for visualization
+        std::stringstream graphStream;
+        
+        // Initial Pose
+        graphStream << g.poseNodeList[0].pose(0) << " " << g.poseNodeList[0].pose(1) << " " << g.poseNodeList[0].pose(2);
+
+        graphStream << "|";
+        int tmpIdx = 0;     // Landmark Positions
+        for (const PtLoc& ldmk : g.geoHier->landmarks.colwise()) graphStream << (tmpIdx++!=0 ? ":": "") << ldmk(0) << " " << ldmk(1);
+
+        // No existing landmarks
+        graphStream << "||";
+        // References to landmarks newly seen in this frame
+        for (int idx = 0; idx < g.geoHier->landmarks.cols(); ++idx) graphStream << (idx!=0 ? " ": "") << idx;
+
+        graphStream << "|-1"; // Previous error (N/A)
+
+        // Construct graph message and publish
+        std_msgs::String graphMsg;
+        graphMsg.data = graphStream.str();
+        graphPub.publish(graphMsg);
 
         // Do nothing else because we need to get more observations before optimizing
 
@@ -593,16 +616,50 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // GraphSLAM Update
         // %%%%%%%%%%%%%%%%
 
+        Eigen::VectorXi existingLdmkIds(matchingPointIndices.size()), newLdmkIds(unmatchedGlobalPoints.size());
+
         // Define a new node and edge for the robot's estimated odometry
         g.addPPEdge(bestGlobalRobotPose);
 
         // Add constraints for all local points that matched with existing landmarks
-        for (const auto& [lIdx, gIdx] : matchingPointIndices) 
+        int tmpIdx = 0;
+        for (const auto& [lIdx, gIdx] : matchingPointIndices) {
             g.addPLEdge(gIdx, localObs.landmarks.col(lIdx));
+            existingLdmkIds(tmpIdx++) = gIdx;
+        }
 
         // Add new landmark nodes unmatched points and add constraints to them, too 
-        for (const auto& [lIdx, globalPoint] : unmatchedGlobalPoints) 
-            g.addPLEdge(g.addLandmarkNode(globalPoint), localObs.landmarks.col(lIdx));
+        tmpIdx = 0;
+        for (const auto& [lIdx, globalPoint] : unmatchedGlobalPoints) {
+            int newId = g.addLandmarkNode(globalPoint);
+            g.addPLEdge(newId, localObs.landmarks.col(lIdx));
+            newLdmkIds(tmpIdx++) = newId;
+        }
+
+        // Publish graph state before optimization
+        std::stringstream graphStream;
+        
+        tmpIdx = 0;     // Poses
+        for (const auto& pn : g.poseNodeList) graphStream << (tmpIdx++!=0 ? ":": "") << pn.pose(0) << " " << pn.pose(1) << " " << pn.pose(2);
+
+        graphStream << "|";
+        tmpIdx = 0;     // Landmark Positions
+        for (const PtLoc& ldmk : g.geoHier->landmarks.colwise()) graphStream << (tmpIdx++!=0 ? ":": "") << ldmk(0) << " " << ldmk(1);
+
+        graphStream << "|";
+        tmpIdx = 0;     // References to existing landmarks seen in this frame
+        for (const int& id : existingLdmkIds) graphStream << (tmpIdx++!=0 ? " ": "") << id;
+
+        graphStream << "|";
+        tmpIdx = 0;     // References to landmarks newly seen in this frame
+        for (const int& id : newLdmkIds) graphStream << (tmpIdx++!=0 ? " ": "") << id;
+
+        graphStream << "|" << g.globalErrors.back(); // Previous error
+
+        // Construct graph message and publish
+        std_msgs::String graphMsg;
+        graphMsg.data = graphStream.str();
+        graphPub.publish(graphMsg);
 
 
         // Optimize the graph once
@@ -765,6 +822,7 @@ int main(int argc, char **argv) {
     polyPub = n.advertise<std_msgs::String>("polygons", 10);
     triPub = n.advertise<std_msgs::String>("triangles", 10);
     ptPub = n.advertise<std_msgs::String>("points", 10);
+    graphPub = n.advertise<std_msgs::String>("graph", 10);
     
 
     ros::spin();
