@@ -124,7 +124,7 @@ void tfCloud(Eigen::Matrix4d existingTfToBase, Eigen::Matrix4d refToTargTf, ObsR
     pcl::PointCloud<pcl::PointXYZ> nonAssociatedCloud, newlyAssociatedCloud;
     pcl::copyPointCloud(obsRec.cloud, nonAssociatedCloud);
     pcl::transformPointCloud(nonAssociatedCloud, newlyAssociatedCloud, fullTfToBase);
-    std::cout << "transforming cloud with tf: " << std::endl << fullTfToBase << std::endl;
+    // std::cout << "transforming cloud with tf: " << std::endl << fullTfToBase << std::endl;
 
     // Add transformed points to keyframe pointcloud to baseframe and store tf in the frame's observation record
     *bigPcPtr += newlyAssociatedCloud;
