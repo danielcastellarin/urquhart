@@ -656,12 +656,12 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
     // Print the graph to a file (for debugging)
     if (isOutput) {
-        if (isDebug) std::cout << "Logging global data... ";
+        // if (isDebug) std::cout << "Logging global data... ";
         writeHierarchyFiles(*g.geoHier, outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
-        if (isDebug) std::cout << "   Done!" << std::endl;
-        if (isDebug) std::cout << "Saving graph data... ";
+        // if (isDebug) std::cout << "   Done!" << std::endl;
+        // if (isDebug) std::cout << "Saving graph data... ";
         g.writeGraphToFiles(outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
-        if (isDebug) std::cout << "   Done!" << std::endl;
+        // if (isDebug) std::cout << "   Done!" << std::endl;
     }
 
     if (pyPub) {

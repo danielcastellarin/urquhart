@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <launch>
-    <rosparam file="$(find urquhart)/run_configs/geoSLAM/big_square.yaml" command="load" />
+    <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/big_square.yaml" command="load" /> -->
+    <rosparam file="$(find urquhart)/run_configs/geoSLAM/config_that_works.yaml" command="load" />
     
     
     <!-- Simulate robot observations -->
@@ -15,7 +16,7 @@
     <!-- Local Bundle Adjustment Node -->
     <node pkg="urquhart" type="KeyframeGen" name="keyframe_maker" output="screen" />
     <group ns="keyframe_maker">
-        <node pkg="urquhart" type="live_gh.py" name="gh_display" output="screen" />
+        <!-- <node pkg="urquhart" type="live_gh.py" name="gh_display" output="screen" /> -->
         <!-- <node pkg="urquhart" type="live_pc.py" name="baseframe_display" output="screen">
             <param name="topicName" value="allPoints" />
         </node> -->
@@ -25,6 +26,8 @@
     </group>
 
     <!-- Global GraphSLAM Node -->
-    <!-- <node pkg="urquhart" type="PolygonSLAM" name="graph_builder" output="screen" />
-    <node pkg="urquhart" type="live_global_display.py" name="global_display" output="screen" /> -->
+    <node pkg="urquhart" type="PolygonSLAM" name="graph_builder" output="screen" />
+    <group ns="graph_builder">
+        <node pkg="urquhart" type="live_gh.py" name="gh_display" output="screen" />
+    </group>
 </launch>
