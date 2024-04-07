@@ -446,7 +446,7 @@ void findBestMatches(const Points& localLandmarks, const Points& globalLandmarks
                 sqDists.minCoeff(&closestLandmarkIdx);
                 if (matchedGlobals.find(closestLandmarkIdx) != matchedGlobals.end()) {
                     goodMatchesIFound.clear(); unmatchedPoints.clear();
-                    break;  // Throw tantrum if landmark is matched twice (this batch of matches was probably bad)
+                    break;  // Throw tantrum if landmark is matched twice (this batch probably included a bad match which messed up the tf)
                 }
 
                 // Record the association
@@ -473,7 +473,8 @@ ros::Publisher graphPub, hierPub;
 SLAMGraph g;
 Eigen::Vector3d mostRecentGlobalPose; // if not tracking updates to all previous robot poses
 bool isDebug = false, isOutput = false, pyPub = false;
-double polyMatchThresh, polyMatchThreshStep;
+double polyMatchThresh, polyMatchThreshStep, ransacValidAssocThresh, ransacMatchRatio;
+int ransacMaxIter, ransacMatchPrereq;
 std::string outputPath;
 
 void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
@@ -517,7 +518,6 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         if (isDebug) {
             std::cout << "Constructed initial global geometric hierarchy " << cloudMsg->header.seq << std::endl;
-            // std::cout << "Initial tree positions:\n" << localObs.landmarks.transpose() << std::endl;
             std::cout << "Number of initial trees: " << localObs.landmarks.cols() << std::endl;
         }
 
@@ -562,10 +562,10 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         do {
             matchingPointIndices = matching::hierarchyIndexMatching(localObs, *g.geoHier, matchingThresh);
             matchingThresh += polyMatchThreshStep;
-        } while (matchingPointIndices.size() < 4 && ++numIt < maxIter);
+        } while (matchingPointIndices.size() < ransacMatchPrereq && ++numIt < maxIter);
 
         // Exit early if we couldn't find matches within a reasonable amount of time
-        if (matchingPointIndices.size() < 4) {
+        if (matchingPointIndices.size() < ransacMatchPrereq) {
             std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because no matches could be found." << std::endl;
             return;
         }
@@ -589,7 +589,16 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         std::vector<std::pair<Eigen::Index, Eigen::Index>> goodAssociations;
         Eigen::Vector3d bestGlobalRobotPose;
         std::vector<std::pair<Eigen::Index, PtLoc>> unmatchedGlobalPoints;
-        findBestMatches(localObs.landmarks, g.geoHier->landmarks, matchingPointIndices, goodAssociations, bestGlobalRobotPose, unmatchedGlobalPoints, 20, 4, 1, 1);
+        findBestMatches(localObs.landmarks, 
+                        g.geoHier->landmarks, 
+                        matchingPointIndices, 
+                        goodAssociations, 
+                        bestGlobalRobotPose, 
+                        unmatchedGlobalPoints, 
+                        ransacMaxIter, 
+                        ransacMatchPrereq, 
+                        ransacValidAssocThresh, 
+                        ransacMatchRatio);
 
         // LOG FINAL ASSOCIATIONS
         if (isOutput) { // TODO save the final associations and new landmarks so the visualization can color them differently
@@ -759,9 +768,9 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
 
 // TODO increase matching iteration count
-// implement alternate association view in visualization
-// play with polygon matching algorithm to be not greedy
-// Implement more strict landmark-matching check in keyframe constructor
+// Continue hacking away to find a stable config of code (seems like global can't localize accurately...)
+// Play with polygon matching algorithm to be not greedy
+// Implement more strict landmark-matching check in keyframe constructor  <--  (keyframe constructor actually looking relatively stable)
 // TODO consolidate logging to single directory for all nodes in pipeline
 
 
@@ -771,12 +780,17 @@ int main(int argc, char **argv) {
     ros::NodeHandle n("~");
 
     std::string absolutePackagePath = ros::package::getPath("urquhart");
+    n.param<std::string>("outputDirName", outputPath, "gTEST");
     isDebug = n.param("debug", true);
     isOutput = n.param("output", true);
     pyPub = n.param("pyPub", false);
     polyMatchThresh = n.param("polyMatchThreshStart", 5.0);
     polyMatchThreshStep = n.param("polyMatchThreshStep", 1.0);
-    n.param<std::string>("outputDirName", outputPath, "gTEST");
+    
+    ransacMaxIter = n.param("ransacMaxIter", 20);
+    ransacMatchPrereq = n.param("ransacMatchPrereq", 4);
+    ransacValidAssocThresh = n.param("ransacValidAssocThresh", 1.0); // meters
+    ransacMatchRatio = n.param("ransacMatchRatio", 1.0);
 
 
     if (isOutput) {

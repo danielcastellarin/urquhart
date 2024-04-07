@@ -112,7 +112,7 @@ def draw_gh(data: String):
     fig3.canvas.draw()
 
 
-graphFrames = 0
+varthing = 180 / np.pi
 def draw_graph(data: String):
     global graphFrames
     fig4.clf()
@@ -120,33 +120,36 @@ def draw_graph(data: String):
     # poses | landmark positions | existing ldmk refs | new ldmk refs | previous global error
     poses, ldmkPos, exLdmkRefs, newLdmkRefs, glError = tuple(data.data.split("|"))
 
-    # Parse and plot the poses
-    for i, pose in enumerate(poses.split(":")):
-        poseX,poseY,radians = tuple(map(float, pose.split(" ")))
-        fig4.gca().plot(poseX, poseY, ('c' if i<graphFrames else 'k'), marker=(3,0, 180*radians/np.pi))
-    
+    # Parse robot poses and landmarks
+    poseList = [tuple(map(float, pose.split(" "))) for pose in poses.split(":")]
+    ldmkList = [tuple(map(float, ldmk.split(" "))) for ldmk in ldmkPos.split(":")]
+
     # Prepare landmark references
     exLdmkRefs = set(map(int, exLdmkRefs.split(" "))) if exLdmkRefs else set()
     newLdmkRefs = set(map(int, newLdmkRefs.split(" "))) if newLdmkRefs else set()
 
-    # Parse and plot landmarks
-    for i, ldmk in enumerate(ldmkPos.split(":")):
-        x,y = tuple(map(float, ldmk.split(" ")))
+    # Draw lines to landmarks matched in this keyframe
+    for i, (x,y) in enumerate(ldmkList):
         if i in exLdmkRefs:
-            fig4.gca().plot(x, y, color='m', marker='o')
-            fig4.gca().plot([poseX, x], [poseY, y], color='m', linestyle="-")
+            fig4.gca().plot([poseList[-1][0], x], [poseList[-1][1], y], color='m', linestyle="-")
         elif i in newLdmkRefs:
-            fig4.gca().plot(x, y, color='purple', marker='o')
-            fig4.gca().plot([poseX, x], [poseY, y], color='purple', linestyle="-")
-        else:
-            fig4.gca().plot(x, y, 'ro')
+            fig4.gca().plot([poseList[-1][0], x], [poseList[-1][1], y], color='purple', linestyle="-")
+
+    # Draw landmark markers
+    for i, (x,y) in enumerate(ldmkList):
+        if i in exLdmkRefs: fig4.gca().plot(x, y, color='m', marker='o')
+        elif i in newLdmkRefs: fig4.gca().plot(x, y, color='purple', marker='o')
+        else: fig4.gca().plot(x, y, 'ro')
+
+    # Draw latest poses
+    for i, (poseX,poseY,radians) in enumerate(poseList):
+        fig4.gca().plot(poseX, poseY, ('b' if i<len(poseList)-1 else 'k'), marker=(3,0, varthing*radians))
+    
 
     # Define plot title and draw
-    fig4.gca().set_title(f"{i} Total Trees | Frame {graphFrames} -> {len(exLdmkRefs) + len(newLdmkRefs)} Trees | Existing Error: {glError}")
+    fig4.gca().set_title(f"{len(ldmkList)} Total Trees | Frame {len(poseList)} -> {len(exLdmkRefs) + len(newLdmkRefs)} Trees | Existing Error: {glError}")
     fig4.tight_layout()
     fig4.canvas.draw()
-    graphFrames += 1
-
 
 
 

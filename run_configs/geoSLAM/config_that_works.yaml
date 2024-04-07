@@ -30,3 +30,7 @@ graph_builder:
   pyPub: true
   polyMatchThreshStart: 1.0
   polyMatchThreshStep: 0.5
+  ransacMaxIter: 20
+  ransacMatchPrereq: 4
+  ransacValidAssocThresh: 1
+  ransacMatchRatio: 1

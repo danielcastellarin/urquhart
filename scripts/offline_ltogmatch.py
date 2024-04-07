@@ -6,18 +6,22 @@ import numpy as np
 from matplotlib.patches import ConnectionPatch
 
 def keypress(event):
-    global frameID, numObs
+    global frameID, toggleAllMatches
     # print('press', event.key)
     if event.key == "escape":
         plt.close()
     else:
-        # plt.clf()   # clear
-        for a in ax.flatten(): a.cla()
         if event.key == 'left' and 1 <= frameID-1:  # base-1 this time
+            for a in ax.flatten(): a.cla()
             frameID -= 1
             draw_vis()
         elif event.key == 'right' and frameID+1 < len(globalErrors):
+            for a in ax.flatten(): a.cla()
             frameID += 1
+            draw_vis()
+        elif event.key == ' ':
+            for a in ax.flatten(): a.cla()
+            toggleAllMatches = not toggleAllMatches
             draw_vis()
 
 
@@ -72,10 +76,26 @@ def draw_vis():
     display_polygons(ax[1][0], directory, frameID+1, get_local_obs, "Local")
     display_polygons(ax[1][1], directory, frameID, get_global_obs, "Global")
 
-    for line in open(f'{directory}/match/{frameID}.txt'):
-        if line == '': continue
-        p1, p2 = [tuple(map(float, c.split(','))) for c in line.split('|')]
-        ax[0][1].add_artist(ConnectionPatch(xyA=p1, xyB=p2, coordsA="data", coordsB="data", axesA=ax[0][0], axesB=ax[0][1], color="blue"))
+    if toggleAllMatches:
+        for line in open(f'{directory}/match/{frameID}.txt'):
+            if line == '': continue
+            p1, p2 = [tuple(map(float, c.split(','))) for c in line.split('|')]
+            ax[0][1].add_artist(ConnectionPatch(xyA=p1, xyB=p2, coordsA="data", coordsB="data", axesA=ax[0][0], axesB=ax[0][1], color="blue"))
+    else:
+        for line in open(f'{directory}/finalAssoc/{frameID}m.txt'):
+            if line == '': continue
+            p1, p2 = [tuple(map(float, c.split(','))) for c in line.split('|')]
+            ax[0][1].add_artist(ConnectionPatch(xyA=p1, xyB=p2, coordsA="data", coordsB="data", axesA=ax[0][0], axesB=ax[0][1], color="magenta"))
+            ax[0][1].plot(p2[0], p2[1], color="m", marker="o")
+            ax[0][0].plot(p1[0], p1[1], color="m", marker="o")
+        
+        for line in open(f'{directory}/finalAssoc/{frameID}u.txt'):
+            if line == '': continue
+            p1, p2 = [tuple(map(float, c.split(','))) for c in line.split('|')]
+            ax[0][1].add_artist(ConnectionPatch(xyA=p1, xyB=p2, coordsA="data", coordsB="data", axesA=ax[0][0], axesB=ax[0][1], color="purple"))
+            ax[0][1].plot(p2[0], p2[1], color="purple", marker="o")
+            ax[0][0].plot(p1[0], p1[1], color="purple", marker="o")
+
     
     fig.canvas.draw()
 
@@ -95,6 +115,7 @@ if not os.path.isdir(args.dirname):
 
 directory = args.dirname
 frameID = args.frameID
+toggleAllMatches = True
 
 # Get all global errors beforehand
 globalErrors = [float(val) for val in open(f'{directory}/global/!gError.txt')]
