@@ -51,7 +51,7 @@ struct SimConfig
             initialPose = Pose(x, y, theta);
             givenStartPose = true;
         }
-        pubRate = nh.param("pubRate", 10); // Hz
+        pubRate = nh.param("pubRate", 10.0); // Hz
         initializationAttempts = nh.param("initializationAttempts", 10000);
         numObservationsForValidLandmark = nh.param("initializationAttempts", 5);
         randomSeed = nh.param("randomSeed", -1);

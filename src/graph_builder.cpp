@@ -416,7 +416,7 @@ void findBestMatches(const Points& localLandmarks, const Points& globalLandmarks
 
     // Loop until we tried too many times or we found the expected number of landmark associations
     int expectedNumMatchedLandmarks = localLandmarks.cols() * matchRatio;
-    for (int i = 0; i < maxIter && acceptedMatches.size() < expectedNumMatchedLandmarks; ++i) {
+    for (int i = 0; i < maxIter && acceptedMatches.size() <= expectedNumMatchedLandmarks; ++i) {
         std::vector<std::pair<Eigen::Index, Eigen::Index>> goodMatchesIFound;
         std::vector<std::pair<Eigen::Index, PtLoc>> unmatchedPoints;
 
@@ -473,8 +473,8 @@ ros::Publisher graphPub, hierPub;
 SLAMGraph g;
 Eigen::Vector3d mostRecentGlobalPose; // if not tracking updates to all previous robot poses
 bool isDebug = false, isOutput = false, pyPub = false;
-double polyMatchThresh, polyMatchThreshStep, ransacValidAssocThresh, ransacMatchRatio;
-int ransacMaxIter, ransacMatchPrereq;
+double polyMatchThresh, polyMatchThreshStep, reqMatchedPolygonRatio, ransacValidAssocThresh, ransacMatchRatio;
+int numSideBoundsForMatch, ransacMaxIter, ransacMatchPrereq;
 std::string outputPath;
 
 void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
@@ -560,7 +560,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         std::vector<std::pair<Eigen::Index, Eigen::Index>> matchingPointIndices;
         int maxIter = 100, numIt = 0;
         do {
-            matchingPointIndices = matching::hierarchyIndexMatching(localObs, *g.geoHier, matchingThresh);
+            // matchingPointIndices = matching::hierarchyIndexMatching(localObs, *g.geoHier, matchingThresh);
+            matchingPointIndices = matching::nonGreedyHierarchyIndexMatching(localObs, *g.geoHier, matchingThresh, numSideBoundsForMatch, reqMatchedPolygonRatio);
             matchingThresh += polyMatchThreshStep;
         } while (matchingPointIndices.size() < ransacMatchPrereq && ++numIt < maxIter);
 
@@ -580,6 +581,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             }
             matOut.close();
         }
+
+        std::cout << "If I were to use all these matches, I'd end up with this transform:\n" << computeRigid2DEuclidTf(localObs.landmarks, g.geoHier->landmarks, matchingPointIndices) << std::endl;
 
         // %%%%%%%%%%%%%%%%%%%%%
         // Association Filtering
@@ -617,6 +620,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         if (isDebug) {
             std::cout << "Final association count is " << goodAssociations.size() << ", and the number of new landmarks is " << unmatchedGlobalPoints.size() << std::endl;
             std::cout << "Estimated best global robot pose: " << bestGlobalRobotPose.transpose() << std::endl;
+            // std::cout << "Final estimated tf:\n" << v2t(bestGlobalRobotPose) << std::endl;
         }
 
 
@@ -779,14 +783,20 @@ int main(int argc, char **argv) {
     ros::init(argc, argv, "graph_builder");
     ros::NodeHandle n("~");
 
+    // I/O parameters
     std::string absolutePackagePath = ros::package::getPath("urquhart");
     n.param<std::string>("outputDirName", outputPath, "gTEST");
     isDebug = n.param("debug", true);
     isOutput = n.param("output", true);
     pyPub = n.param("pyPub", false);
+
+    // Hierarchy matching parameters
     polyMatchThresh = n.param("polyMatchThreshStart", 5.0);
     polyMatchThreshStep = n.param("polyMatchThreshStep", 1.0);
+    numSideBoundsForMatch = n.param("numSideBoundsForMatch", 3);
+    reqMatchedPolygonRatio = n.param("reqMatchedPolygonRatio", 0.5); // 0.0 disables this feature
     
+    // Data association filtering parameters
     ransacMaxIter = n.param("ransacMaxIter", 20);
     ransacMatchPrereq = n.param("ransacMatchPrereq", 4);
     ransacValidAssocThresh = n.param("ransacValidAssocThresh", 1.0); // meters

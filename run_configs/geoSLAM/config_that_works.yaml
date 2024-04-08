@@ -28,9 +28,13 @@ graph_builder:
   debug: true
   output: true
   pyPub: true
-  polyMatchThreshStart: 1.0
+
+  polyMatchThreshStart: 2.0
   polyMatchThreshStep: 0.5
-  ransacMaxIter: 20
-  ransacMatchPrereq: 4
-  ransacValidAssocThresh: 1
+  numSideBoundsForMatch: 3
+  reqMatchedPolygonRatio: 0.5
+  
+  ransacMaxIter: 50
+  ransacMatchPrereq: 6
+  ransacValidAssocThresh: 1.5
   ransacMatchRatio: 1
