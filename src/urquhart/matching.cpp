@@ -82,25 +82,38 @@ void nonGreedyPolygonMatching(
 {
     double distancePlaceholder;
     int numExistingMatches = polygonMatches.size();
-    // For each reference Polygon, try to find its best matching polygon in the target set
+
+    std::unordered_map<size_t, std::pair<double, size_t>> targetsClosestDist;
+    std::unordered_map<size_t, std::map<double, size_t>> refClosestTargets;
+
+    // For each reference Polygon, find its distance to each Polygon in the target set
     for (const auto& rIdx : refIds) {
-        int closestTarg = -1;
-        double bestDist = 100000; // assuming this will always be larger that the distance threshold
         urquhart::Polygon rp = ref.hier->getPolygon(rIdx);
 
         for (const auto& tIdx : targIds) {
             urquhart::Polygon tp = targ.hier->getPolygon(tIdx);
 
             // Record match if target is the closest polygon under the threshold
-            distancePlaceholder = std::abs(rp.n - tp.n) <= numSideBoundsForMatch ? descriptorDistance(rp.descriptor, tp.descriptor) : bestDist;
-            if (distancePlaceholder < thresh && distancePlaceholder < bestDist) {
-                closestTarg = tIdx;
-                bestDist = distancePlaceholder;
+            distancePlaceholder = std::abs(rp.n - tp.n) <= numSideBoundsForMatch ? descriptorDistance(rp.descriptor, tp.descriptor) : 1000000;
+
+            if (distancePlaceholder < thresh) {
+                refClosestTargets[rIdx].insert({distancePlaceholder, tIdx});
+                if (targetsClosestDist.find(tIdx) == targetsClosestDist.end() || distancePlaceholder < targetsClosestDist[tIdx].first)
+                    targetsClosestDist[tIdx] = {distancePlaceholder, rIdx};
             }
         }
-        // Record the best valid match
-        if (closestTarg != -1) polygonMatches.push_back({rIdx, closestTarg});
     }
+
+    // Add all pairs from the target polygon's perspective
+    for (const auto& [tIdx, closestRef] : targetsClosestDist)
+        polygonMatches.push_back({closestRef.second, tIdx});
+
+    // For any pair that the reference disagrees with, add the next closest match (if possible)
+    // for (const auto& [rIdx, closebyTargets] : refClosestTargets) {
+    //     for (auto targIter = closebyTargets.begin(); targIter != closebyTargets.end() && )
+    //     if (targIter->second)
+    // }
+    // ^^^^^ unnecessary
 
     // Invalidate these matches if not enough of them were made
     if (polygonMatches.size() - numExistingMatches < reqMatchedPolygonRatio * refIds.size()) polygonMatches.resize(numExistingMatches);
