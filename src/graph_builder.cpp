@@ -10,10 +10,12 @@
 #include <iostream>
 #include <filesystem>
 #include <sstream>
+#include <list>
 
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/common/transforms.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <std_msgs/String.h>
 
@@ -467,6 +469,123 @@ void findBestMatches(const Points& localLandmarks, const Points& globalLandmarks
 }
 
 
+Eigen::Matrix4d matchesToCloudTf(const Points& localLandmarks, const Points& globalLandmarks, const std::vector<std::pair<Eigen::Index, Eigen::Index>>& pointMatchRefs, const std::vector<int>& indices, int numMatches) {
+    Eigen::MatrixXd A(numMatches+numMatches, 4);
+    Eigen::VectorXd b(numMatches+numMatches);
+    // TODO if not all matches valid, count how many of them are, then do conservativeResize at the end to crop out extra space
+
+    // https://math.stackexchange.com/questions/77462/finding-transformation-matrix-between-two-2d-coordinate-frames-pixel-plane-to
+    int startRow = 0;
+    for (int i = 0; i < numMatches; ++i) {
+        // TODO perform more elegant block assignments here
+        Eigen::Index lIdx = pointMatchRefs.at(indices.at(i)).first, gIdx = pointMatchRefs.at(indices.at(i)).second;
+        A.row(startRow)   = (Eigen::RowVector4d() << localLandmarks(0, lIdx), -localLandmarks(1, lIdx), 1, 0).finished();
+        A.row(startRow+1) = (Eigen::RowVector4d() << localLandmarks(1, lIdx),  localLandmarks(0, lIdx), 0, 1).finished();
+        b[startRow]   = globalLandmarks(0, gIdx);
+        b[startRow+1] = globalLandmarks(1, gIdx);
+        startRow += 2;
+    }
+
+    // https://www.cs.cmu.edu/~16385/s17/Slides/10.1_2D_Alignment__LLS.pdf <-- slide 24
+    // x = (A^T A)^-1 A^T b
+    Eigen::Vector4d x = (A.transpose() * A).inverse() * A.transpose() * b;
+
+    // Return the 4x4 matrix to transform frames: reference --> target
+    return Eigen::Matrix4d{
+        {x[0], -x[1], 0, x[2]},
+        {x[1],  x[0], 0, x[3]},
+        {   0,     0, 1,    0},
+        {   0,     0, 0,    1}
+    };
+}
+
+
+Points estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
+        const std::vector<std::pair<Eigen::Index, Eigen::Index>>& allMatches,
+        std::unordered_map<Eigen::Index, std::pair<Eigen::Index, PtLoc>>& acceptedMatches,
+        Eigen::Vector3d& bestTf, std::vector<std::pair<Eigen::Index, PtLoc>>& unmatchedLocals,
+        int maxIter, int reqMatchesForTf, double threshForValidAssoc, double matchRatio)
+{
+    std::random_device randomDevice;
+    std::mt19937 rng(randomDevice());
+    
+    // Init indices to access the matches
+    std::vector<int> indices(allMatches.size());
+    std::iota(indices.begin(), indices.end(), 0);
+
+    Points unassociatedPointsInGlobal(2, localLandmarks.cols());
+    // unassociatedPointsInGlobal.conservativeResize(2, numnonassoc);
+
+    // pcl::PointCloud<pcl::PointXYZ> tmpLocalCloud, localInGlobalCloud, bestCloud;
+    // pcl::copyPointCloud(localCloud, tmpLocalCloud);
+    // pcl::transformPointCloud(tmpLocalCloud, localInGlobalCloud, tf);
+
+    // Loop until we tried too many times or we found the expected number of landmark associations
+    int expectedNumMatchedLandmarks = localLandmarks.cols() * matchRatio;
+    for (int i = 0; i < maxIter && acceptedMatches.size() <= expectedNumMatchedLandmarks; ++i) {
+        std::unordered_map<Eigen::Index, std::pair<Eigen::Index, PtLoc>> invertedGoodMatchesSoFar; // targ --> ref
+        std::unordered_set<Eigen::Index> problematicGlobals;
+        std::vector<std::pair<Eigen::Index, PtLoc>> unmatchedPoints;
+
+        // Take random subset of matches to use for calculating the global -> local transform
+        std::shuffle(indices.begin(), indices.end(), rng);
+        Eigen::Matrix3d tf = tfFromSubsetMatches(localLandmarks, globalLandmarks, allMatches, indices, reqMatchesForTf);
+
+
+        // Match as many points in the keyframe with landmarks in the global frame
+        for (int lIdx = 0; lIdx < localLandmarks.cols(); ++lIdx) {
+            // Define this tree's local position as a homogeneous matrix
+            Eigen::Matrix3d localPointTf {
+                {1, 0, localLandmarks(0, lIdx)},
+                {0, 1, localLandmarks(1, lIdx)},
+                {0, 0, 1},
+            };
+            // Obtain the position of this tree in the global frame
+            PtLoc globalPoint{(tf * localPointTf)(Eigen::seq(0,1), 2)};
+
+            // Obtain that point's squared distance to each global landmark 
+            Eigen::VectorXd sqDists = squaredDistanceToPoint(globalLandmarks, globalPoint);
+
+            // Make an association with the nearest neighbor
+            if ((sqDists.array() < threshForValidAssoc).count() > 0) {
+                // Ensure the closest landmark has not already been matched with something
+                Eigen::Index closestLandmarkIdx;
+                sqDists.minCoeff(&closestLandmarkIdx);
+
+                // Ignore the association if the closest global point was already the source of conflict with other local points
+                if (problematicGlobals.find(closestLandmarkIdx) != problematicGlobals.end()) {
+                    unmatchedPoints.push_back({lIdx, globalPoint});
+
+                // Cancel a previous match if this local point is closest to a global point that has already been matched
+                } else if (invertedGoodMatchesSoFar.find(closestLandmarkIdx) != invertedGoodMatchesSoFar.end()) {
+                    problematicGlobals.insert(closestLandmarkIdx);
+                    unmatchedPoints.push_back({lIdx, globalPoint});
+                    unmatchedPoints.push_back(invertedGoodMatchesSoFar[closestLandmarkIdx]);
+                    invertedGoodMatchesSoFar.erase(closestLandmarkIdx);
+
+                // Otherwise, keep this association because it is probably right
+                } else {
+                    invertedGoodMatchesSoFar[closestLandmarkIdx] = {lIdx, globalPoint};
+                }
+            } else unmatchedPoints.push_back({lIdx, globalPoint});
+        }
+        
+        // Keep this result if we have not seen anything more fitting
+        if (invertedGoodMatchesSoFar.size() > acceptedMatches.size()) { // TODO make these copies shallow
+            acceptedMatches = invertedGoodMatchesSoFar;
+            bestTf = t2v(tf);
+            unmatchedLocals = unmatchedPoints;
+        }
+    }
+
+    // TODO unsure if this is necessary anymore
+    // if for some reason no matches were accepted, set the tf to be the original estimated by all the naive GH matches
+    if (acceptedMatches.empty()) {
+        bestTf = t2v(tfFromSubsetMatches(localLandmarks, globalLandmarks, allMatches, indices, allMatches.size()));
+    }
+}
+
+
 ros::Publisher graphPub, hierPub;
 
 
@@ -476,6 +595,17 @@ bool isDebug = false, isOutput = false, pyPub = false;
 double polyMatchThresh, polyMatchThreshStep, reqMatchedPolygonRatio, ransacValidAssocThresh, ransacMatchRatio;
 int numSideBoundsForMatch, ransacMaxIter, ransacMatchPrereq;
 std::string outputPath;
+
+// Association network
+// std::unordered_map<ObservedTree, std::unordered_set<ObservedTree>> unresolvedLandmarks;
+// std::queue<std::vector<ObservedTree>> activeObsWindow;
+using PointRef = std::pair<int, int>;   // <frameID, cloudIdx>
+std::unordered_map<PointRef, std::unordered_set<PointRef>> unresolvedLandmarks;
+// std::queue<pcl::PointCloud<pcl::PointXYZ>> activeObsWindow;
+// std::list<pcl::PointCloud<pcl::PointXYZ>> activeObsWindow;
+std::list<Points> activeObsWindow;
+
+
 
 void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     if (isDebug) std::cout << "Received keyframe " << cloudMsg->header.seq << std::endl;
