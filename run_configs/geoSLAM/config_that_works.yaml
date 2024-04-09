@@ -36,5 +36,8 @@ graph_builder:
   
   ransacMaxIter: 50
   ransacMatchPrereq: 6
-  ransacValidAssocThresh: 1.5
+  ransacValidAssocThresh: 0.5
   ransacMatchRatio: 1
+
+  associationWindowSize: 5
+  ptAssocThresh: 1.0

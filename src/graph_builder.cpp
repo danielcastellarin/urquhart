@@ -23,6 +23,23 @@
 #include <ros/package.h>
 
 
+// A hash function used to hash a pair of any kind
+struct hash_pair {
+    template <class T1, class T2>
+    size_t operator()(const std::pair<T1, T2>& p) const
+    {
+        auto hash1 = std::hash<T1>{}(p.first);
+        auto hash2 = std::hash<T2>{}(p.second);
+ 
+        if (hash1 != hash2) {
+            return hash1 ^ hash2;              
+        }
+         
+        // If hash1 == hash2, their XOR is zero.
+          return hash1;
+    }
+};
+
 void writeHierarchyFiles(const urquhart::Observation& trees, std::string filePath, std::string fileName) {
     std::ofstream plyOut(filePath+"/p/"+fileName), triOut(filePath+"/t/"+fileName), 
                     hieOut(filePath+"/h/"+fileName), dscOut(filePath+"/d/"+fileName);
@@ -186,7 +203,7 @@ struct SLAMGraph {
         addPoseNode(currentGlobalPose);
     }
     
-    void addLandmarkNode(int idxInHier, PtLoc& position) {
+    void addLandmarkNode(int idxInHier, PtLoc& globalPosition) {
         // Precondition: landmark data must already be in geometric hierarchy at the given index 
         
         // Define landmark node
@@ -194,21 +211,21 @@ struct SLAMGraph {
 
         // Append (x,y) to the end of state vector
         stateVector.conservativeResize(stateVector.size()+2);
-        stateVector.tail(2) = position;
+        stateVector.tail(2) = globalPosition;
     }
-    int addLandmarkNode(const PtLoc& position) {
+    int addLandmarkNode(const PtLoc& globalPosition) {
 
         // Add the point to the set of landmarks in the global geometric hierarcy
         int ldmkIdx = geoHier->landmarks.cols();
         geoHier->landmarks.conservativeResize(2, ldmkIdx+1);
-        geoHier->landmarks.col(ldmkIdx) = position;
+        geoHier->landmarks.col(ldmkIdx) = globalPosition;
         
         // Define landmark node
         landmarkNodeList.push_back(LandmarkNode(ldmkIdx, stateVector.size()));
 
         // Append (x,y) to the end of state vector
         stateVector.conservativeResize(stateVector.size()+2);
-        stateVector.tail(2) = position;
+        stateVector.tail(2) = globalPosition;
 
         return ldmkIdx;
     }
@@ -218,6 +235,14 @@ struct SLAMGraph {
         // May be called with landmark nodes that existed before current keyframe or nodes that were just created
         // landmarkLocalPosition is taken directly from the landmark's position relative to the robot in the current keyframe
         plEdges.push_back(PLEdge(poseNodeList.size()-1, globalLandmarkIdx, landmarkLocalPosition));
+    }
+
+    void addPLEdge(int poseNodeIdx, Eigen::Index globalLandmarkIdx, const PtLoc& landmarkLocalPosition) {
+        // Precondition: landmark node must already be in the graph's list of nodes
+        
+        // May be called with landmark nodes that existed before current keyframe or nodes that were just created
+        // landmarkLocalPosition is taken directly from the landmark's position relative to the robot in the current keyframe
+        plEdges.push_back(PLEdge(poseNodeIdx, globalLandmarkIdx, landmarkLocalPosition));
     }
 
     void computeGlobalError() {
@@ -500,7 +525,7 @@ Eigen::Matrix4d matchesToCloudTf(const Points& localLandmarks, const Points& glo
 }
 
 
-Points estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
+void estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
         const std::vector<std::pair<Eigen::Index, Eigen::Index>>& allMatches,
         std::unordered_map<Eigen::Index, std::pair<Eigen::Index, PtLoc>>& acceptedMatches,
         Eigen::Vector3d& bestTf, std::vector<std::pair<Eigen::Index, PtLoc>>& unmatchedLocals,
@@ -513,12 +538,6 @@ Points estimateBestTf(const Points& localLandmarks, const Points& globalLandmark
     std::vector<int> indices(allMatches.size());
     std::iota(indices.begin(), indices.end(), 0);
 
-    Points unassociatedPointsInGlobal(2, localLandmarks.cols());
-    // unassociatedPointsInGlobal.conservativeResize(2, numnonassoc);
-
-    // pcl::PointCloud<pcl::PointXYZ> tmpLocalCloud, localInGlobalCloud, bestCloud;
-    // pcl::copyPointCloud(localCloud, tmpLocalCloud);
-    // pcl::transformPointCloud(tmpLocalCloud, localInGlobalCloud, tf);
 
     // Loop until we tried too many times or we found the expected number of landmark associations
     int expectedNumMatchedLandmarks = localLandmarks.cols() * matchRatio;
@@ -592,19 +611,34 @@ ros::Publisher graphPub, hierPub;
 SLAMGraph g;
 Eigen::Vector3d mostRecentGlobalPose; // if not tracking updates to all previous robot poses
 bool isDebug = false, isOutput = false, pyPub = false;
-double polyMatchThresh, polyMatchThreshStep, reqMatchedPolygonRatio, ransacValidAssocThresh, ransacMatchRatio;
-int numSideBoundsForMatch, ransacMaxIter, ransacMatchPrereq;
+double polyMatchThresh, polyMatchThreshStep, reqMatchedPolygonRatio, ransacValidAssocThresh, ransacMatchRatio, ptAssocThresh;
+int numSideBoundsForMatch, ransacMaxIter, ransacMatchPrereq, associationWindowSize, numOptimizations = 0;
 std::string outputPath;
 
 // Association network
-// std::unordered_map<ObservedTree, std::unordered_set<ObservedTree>> unresolvedLandmarks;
-// std::queue<std::vector<ObservedTree>> activeObsWindow;
 using PointRef = std::pair<int, int>;   // <frameID, cloudIdx>
-std::unordered_map<PointRef, std::unordered_set<PointRef>> unresolvedLandmarks;
-// std::queue<pcl::PointCloud<pcl::PointXYZ>> activeObsWindow;
-// std::list<pcl::PointCloud<pcl::PointXYZ>> activeObsWindow;
-std::list<Points> activeObsWindow;
+using AssocSet = std::unordered_set<PointRef, hash_pair>;
+std::unordered_map<PointRef, AssocSet, hash_pair> unresolvedLandmarks;
+std::map<int, Points> activeObsWindow;
 
+bool canFormKClique(const AssocSet& a, const AssocSet& b, const int &k) {
+    // Escape early if the old point does not have enough associations to belong to a k-clique
+    if (a.size() < k) return false;
+
+    // Iterate over the set with fewer elements (we should be passing the sets by reference here)
+    AssocSet s1, s2;
+    if (a.size() < b.size()) s1 = a, s2 = b; else s1 = b, s2 = a;
+
+    // Return true if the number of shared elements in the sets surpasses k
+    int count = 0;
+    for (const PointRef& pf : s1) if (s2.find(pf) != s2.end()) ++count;
+    return count >= k;
+}
+
+void deleteTreeAssoc(std::unordered_map<PointRef, AssocSet, hash_pair> map, PointRef treeRefToDelete) {
+    for (const PointRef& pf : map[treeRefToDelete]) if (!(treeRefToDelete == pf)) map[pf].erase(treeRefToDelete);
+    map.erase(treeRefToDelete);
+}
 
 
 void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
@@ -714,18 +748,18 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         std::cout << "If I were to use all these matches, I'd end up with this transform:\n" << computeRigid2DEuclidTf(localObs.landmarks, g.geoHier->landmarks, matchingPointIndices) << std::endl;
 
-        // %%%%%%%%%%%%%%%%%%%%%
-        // Association Filtering
-        // %%%%%%%%%%%%%%%%%%%%%
+        // %%%%%%%%%%%%%%%%%%%%
+        // Transform Estimation
+        // %%%%%%%%%%%%%%%%%%%%
 
         // Filter associations while preparing data for GraphSLAM
-        std::vector<std::pair<Eigen::Index, Eigen::Index>> goodAssociations;
+        std::unordered_map<Eigen::Index, std::pair<Eigen::Index, PtLoc>> goodAssociationMap;
         Eigen::Vector3d bestGlobalRobotPose;
         std::vector<std::pair<Eigen::Index, PtLoc>> unmatchedGlobalPoints;
-        findBestMatches(localObs.landmarks, 
+        estimateBestTf(localObs.landmarks, 
                         g.geoHier->landmarks, 
                         matchingPointIndices, 
-                        goodAssociations, 
+                        goodAssociationMap, 
                         bestGlobalRobotPose, 
                         unmatchedGlobalPoints, 
                         ransacMaxIter, 
@@ -736,8 +770,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // LOG FINAL ASSOCIATIONS
         if (isOutput) { // TODO save the final associations and new landmarks so the visualization can color them differently
             std::ofstream ascOut(outputPath+"/finalAssoc/"+std::to_string(g.poseNodeList.size())+"m.txt");
-            for (const auto& [lIdx, gIdx] : goodAssociations) {
-                ascOut << localObs.ldmkX(lIdx) << "," << localObs.ldmkY(lIdx) << "|";
+            for (const auto& [gIdx, localInGlobal] : goodAssociationMap) {
+                ascOut << localObs.ldmkX(localInGlobal.first) << "," << localObs.ldmkY(localInGlobal.first) << "|";
                 ascOut << g.geoHier->ldmkX(gIdx) << "," << g.geoHier->ldmkY(gIdx) << std::endl;
             }
             ascOut.close();
@@ -748,10 +782,82 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             uasOut.close();
         }
         if (isDebug) {
-            std::cout << "Final association count is " << goodAssociations.size() << ", and the number of new landmarks is " << unmatchedGlobalPoints.size() << std::endl;
+            std::cout << "Final association count is " << goodAssociationMap.size() << ", and the number of new landmarks is " << unmatchedGlobalPoints.size() << std::endl;
             std::cout << "Estimated best global robot pose: " << bestGlobalRobotPose.transpose() << std::endl;
             // std::cout << "Final estimated tf:\n" << v2t(bestGlobalRobotPose) << std::endl;
         }
+
+        // %%%%%%%%%%%%%%%%%%%%%
+        // Association Filtering
+        // %%%%%%%%%%%%%%%%%%%%%
+
+        // Store both the local and global positions of unmatched landmarks
+        // idx 0,n = global; n+1,2n = local
+        int numUnmatchedLdmks = unmatchedGlobalPoints.size(), ldmkRefIdx = 0; // reference idx
+        Points keyframePoints(2, numUnmatchedLdmks + numUnmatchedLdmks);
+        std::vector<std::pair<PtLoc, AssocSet>> newlyEstablishedLandmarkObservations;
+
+
+        // NOTE: "numOptimizations" is the current "frameID" --> corresponds to pose nodes so that we can include the earlier observations of the tree in the graph
+        // NOTE: "unresolvedLandmarks" is the association network (map from "frameID" -> Points)
+        for (const auto& [lIdx, globalPoint] : unmatchedGlobalPoints) {
+            // Add global and local positions to the association network reference list
+            keyframePoints.col(ldmkRefIdx) = globalPoint;
+            keyframePoints.col(numUnmatchedLdmks+ldmkRefIdx) = localObs.landmarks.col(lIdx);
+
+            PointRef pf = {numOptimizations, ldmkRefIdx++}; // {"frameID", ldmkIdx}
+            AssocSet newAssociations;
+
+            // Attempt to associate the "Tree" with every point from previous observations in the active window
+            for (auto& [observedTreeRef, associatedTreeRefs] : unresolvedLandmarks) {
+                if (observedTreeRef.first == pf.first) continue;    // Do not associate points in the same frame
+
+                // Using max feature distance instead of euclidean distance for increased speed
+                if (((activeObsWindow[observedTreeRef.first].col(observedTreeRef.second) - keyframePoints.col(pf.second)).array().abs() < ptAssocThresh).all()) {
+                    associatedTreeRefs.insert(pf);
+                    newAssociations.insert(observedTreeRef);
+                }
+            }
+
+            // Check if the newly-observed tree has enough associated observations to establish a new landmark
+            newAssociations.insert(pf);
+            AssocSet maxSubset = newAssociations;
+            AssocSet::iterator itr = maxSubset.begin();
+            bool isLandmarkDefined = false;
+
+            while (maxSubset.size() >= associationWindowSize && !isLandmarkDefined) {
+                if (canFormKClique(unresolvedLandmarks[*itr], maxSubset, associationWindowSize)) {
+                    // if the iterator reaches the end of this new tree's association set, 
+                    // then all remaining points in the set should form a k-clique - satisfying the condition to make a landmark
+                    isLandmarkDefined = ++itr == maxSubset.end();
+                } else {
+                    maxSubset.erase(itr);       // Remove any elements cannot compose a k-clique with the new point
+                    itr = maxSubset.begin();    // Double-check any elements that have already been processed
+                }
+            }
+            unresolvedLandmarks[pf] = newAssociations;
+
+            if (isLandmarkDefined) { // Collapse the observations into a single landmark
+                PtLoc establishedLdmk = Eigen::Vector2d::Zero();
+                // Delete all references to the trees that are about to become a landmark
+                // Average out the position of the landmark
+                for (const PointRef& essentialTree : maxSubset) {
+                    deleteTreeAssoc(unresolvedLandmarks, essentialTree);
+
+
+                    // if (essentialTree.first == numOptimizations)
+                    //     establishedLdmk += keyframePoints.col(essentialTree.second);
+                    // else
+                    //     establishedLdmk += activeObsWindow[essentialTree.first].col(essentialTree.second);
+
+                    establishedLdmk += (essentialTree.first == numOptimizations ? keyframePoints : activeObsWindow[essentialTree.first]).col(essentialTree.second);
+                } 
+                newlyEstablishedLandmarkObservations.push_back({establishedLdmk / associationWindowSize, maxSubset});
+            }
+        }
+
+        // Store the positions of this keyframe's unassociated points
+        activeObsWindow[numOptimizations] = keyframePoints;
 
 
         // %%%%%%%%%%%%%%%%
@@ -770,12 +876,19 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             existingLdmkIds(tmpIdx++) = gIdx;
         }
 
-        // Add new landmark nodes unmatched points and add constraints to them, too 
+        // Add new landmark nodes (if any) and add constraints to their original observations 
         tmpIdx = 0;
-        for (const auto& [lIdx, globalPoint] : unmatchedGlobalPoints) {
+        for (const auto& [globalPoint, as] : newlyEstablishedLandmarkObservations) {
+            // Define the new landmark
             int newId = g.addLandmarkNode(globalPoint);
-            g.addPLEdge(newId, localObs.landmarks.col(lIdx));
             newLdmkIds(tmpIdx++) = newId;
+
+            // Retroactively create constraints from the original observations
+            for (const auto& [poseNodeIdx, ldmkRefIdx] : as) {
+                // int pointSetSize = activeObsWindow[poseNodeIdx].cols()/2;
+                int pointSetSize = activeObsWindow[poseNodeIdx].cols() >> 1;
+                g.addPLEdge(poseNodeIdx, newId, activeObsWindow[poseNodeIdx].col(pointSetSize + ldmkRefIdx));
+            }
         }
 
         // Publish graph state before optimization
@@ -825,6 +938,18 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             if (isDebug) std::cout << "Recomputing edge lengths." << std::endl;
             g.geoHier->recomputeEdgeLengthsAndDescriptors();
         }
+
+        if (activeObsWindow.size() == associationWindowSize+associationWindowSize) {
+            // Erase every unresolved tree position from the oldest observation in our window, skipping any that already became landmarks
+            int frameID = activeObsWindow.begin()->first;
+            for (int idx = 0; idx < activeObsWindow.begin()->second.cols() >> 1; ++idx) {
+                PointRef pf = {frameID, idx};
+                if (unresolvedLandmarks.find(pf) != unresolvedLandmarks.end())
+                    deleteTreeAssoc(unresolvedLandmarks, pf);
+            }
+            activeObsWindow.erase(activeObsWindow.begin()); // Remove the oldest observation from our active window
+        }
+
         
         
         // NOTE g.geoHier polygons will be handled below
@@ -852,6 +977,10 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // decide whether polygon "edgeLengths" and "descriptor" should be updated too  
 
     }
+
+    // Increment to indicate the graph has been updated once
+    // Also corresponds to the number of pose nodes in the graph 
+    ++numOptimizations;
 
     // Print the graph to a file (for debugging)
     if (isOutput) {
@@ -931,6 +1060,10 @@ int main(int argc, char **argv) {
     ransacMatchPrereq = n.param("ransacMatchPrereq", 4);
     ransacValidAssocThresh = n.param("ransacValidAssocThresh", 1.0); // meters
     ransacMatchRatio = n.param("ransacMatchRatio", 1.0);
+
+    // Association Network
+    associationWindowSize = n.param("associationWindowSize", 5);
+    ptAssocThresh = n.param("ptAssocThresh", 1.0);
 
 
     if (isOutput) {
