@@ -128,6 +128,8 @@ def draw_graph(data: String):
     exLdmkRefs = set(map(int, exLdmkRefs.split(" "))) if exLdmkRefs else set()
     newLdmkRefs = set(map(int, newLdmkRefs.split(" "))) if newLdmkRefs else set()
 
+    # rospy.loginfo(newLdmkRefs)
+
     # Draw lines to landmarks matched in this keyframe
     for i, (x,y) in enumerate(ldmkList):
         if i in exLdmkRefs:
@@ -147,7 +149,7 @@ def draw_graph(data: String):
     
 
     # Define plot title and draw
-    fig4.gca().set_title(f"{len(ldmkList)} Total Trees | Frame {len(poseList)} -> {len(exLdmkRefs) + len(newLdmkRefs)} Trees | Existing Error: {glError}")
+    fig4.gca().set_title(f"Frame {len(poseList)} | {len(exLdmkRefs)} Associations | Established {len(newLdmkRefs)} Trees | Existing Error: {glError}")
     fig4.tight_layout()
     fig4.canvas.draw()
 

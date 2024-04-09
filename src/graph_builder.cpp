@@ -425,106 +425,40 @@ Eigen::Matrix3d tfFromSubsetMatches(const Points& localLandmarks, const Points& 
     };
 }
 
+
+// Eigen::Matrix4d matchesToCloudTf(const Points& localLandmarks, const Points& globalLandmarks, const std::vector<std::pair<Eigen::Index, Eigen::Index>>& pointMatchRefs, const std::vector<int>& indices, int numMatches) {
+//     Eigen::MatrixXd A(numMatches+numMatches, 4);
+//     Eigen::VectorXd b(numMatches+numMatches);
+//     // TODO if not all matches valid, count how many of them are, then do conservativeResize at the end to crop out extra space
+
+//     // https://math.stackexchange.com/questions/77462/finding-transformation-matrix-between-two-2d-coordinate-frames-pixel-plane-to
+//     int startRow = 0;
+//     for (int i = 0; i < numMatches; ++i) {
+//         // TODO perform more elegant block assignments here
+//         Eigen::Index lIdx = pointMatchRefs.at(indices.at(i)).first, gIdx = pointMatchRefs.at(indices.at(i)).second;
+//         A.row(startRow)   = (Eigen::RowVector4d() << localLandmarks(0, lIdx), -localLandmarks(1, lIdx), 1, 0).finished();
+//         A.row(startRow+1) = (Eigen::RowVector4d() << localLandmarks(1, lIdx),  localLandmarks(0, lIdx), 0, 1).finished();
+//         b[startRow]   = globalLandmarks(0, gIdx);
+//         b[startRow+1] = globalLandmarks(1, gIdx);
+//         startRow += 2;
+//     }
+
+//     // https://www.cs.cmu.edu/~16385/s17/Slides/10.1_2D_Alignment__LLS.pdf <-- slide 24
+//     // x = (A^T A)^-1 A^T b
+//     Eigen::Vector4d x = (A.transpose() * A).inverse() * A.transpose() * b;
+
+//     // Return the 4x4 matrix to transform frames: reference --> target
+//     return Eigen::Matrix4d{
+//         {x[0], -x[1], 0, x[2]},
+//         {x[1],  x[0], 0, x[3]},
+//         {   0,     0, 1,    0},
+//         {   0,     0, 0,    1}
+//     };
+// }
+
 // euclid dist b/w points after transform (d) = 0.5
 // ratio of outliers to cause exit (r) = 0.99
 // max iterations (s) = 40000
-void findBestMatches(const Points& localLandmarks, const Points& globalLandmarks,
-        const std::vector<std::pair<Eigen::Index, Eigen::Index>>& allMatches,
-        std::vector<std::pair<Eigen::Index, Eigen::Index>>& acceptedMatches,
-        Eigen::Vector3d& bestTf, std::vector<std::pair<Eigen::Index, PtLoc>>& unmatchedLocals,
-        int maxIter, int reqMatchesForTf, double threshForValidAssoc, double matchRatio)
-{
-    std::random_device randomDevice;
-    std::mt19937 rng(randomDevice());
-    
-    // Init indices to access the matches
-    std::vector<int> indices(allMatches.size());
-    std::iota(indices.begin(), indices.end(), 0);
-
-    // Loop until we tried too many times or we found the expected number of landmark associations
-    int expectedNumMatchedLandmarks = localLandmarks.cols() * matchRatio;
-    for (int i = 0; i < maxIter && acceptedMatches.size() <= expectedNumMatchedLandmarks; ++i) {
-        std::vector<std::pair<Eigen::Index, Eigen::Index>> goodMatchesIFound;
-        std::vector<std::pair<Eigen::Index, PtLoc>> unmatchedPoints;
-
-        // Take random subset of matches to use for calculating the global -> local transform
-        std::shuffle(indices.begin(), indices.end(), rng);
-        Eigen::Matrix3d tf = tfFromSubsetMatches(localLandmarks, globalLandmarks, allMatches, indices, reqMatchesForTf);
-
-        // Match as many points in the keyframe with landmarks in the global frame
-        std::unordered_set<Eigen::Index> matchedGlobals;
-        for (int lIdx = 0; lIdx < localLandmarks.cols(); ++lIdx) {
-            // Define this tree's local position as a homogeneous matrix
-            Eigen::Matrix3d localPointTf {
-                {1, 0, localLandmarks(0, lIdx)},
-                {0, 1, localLandmarks(1, lIdx)},
-                {0, 0, 1},
-            };
-            // Obtain the position of this tree in the global frame
-            PtLoc globalPoint{(tf * localPointTf)(Eigen::seq(0,1), 2)};
-
-            // Obtain that point's squared distance to each global landmark 
-            Eigen::VectorXd sqDists = squaredDistanceToPoint(globalLandmarks, globalPoint);
-
-            // Make an association with the nearest neighbor
-            if ((sqDists.array() < threshForValidAssoc).count() > 0) {
-                // Ensure the closest landmark has not already been matched with something
-                Eigen::Index closestLandmarkIdx;
-                sqDists.minCoeff(&closestLandmarkIdx);
-                if (matchedGlobals.find(closestLandmarkIdx) != matchedGlobals.end()) {
-                    goodMatchesIFound.clear(); unmatchedPoints.clear();
-                    break;  // Throw tantrum if landmark is matched twice (this batch probably included a bad match which messed up the tf)
-                }
-
-                // Record the association
-                goodMatchesIFound.push_back({lIdx, closestLandmarkIdx});
-                matchedGlobals.insert(closestLandmarkIdx);
-
-            } else unmatchedPoints.push_back({lIdx, globalPoint});
-        }
-        
-        // Keep this result if we have not seen anything more fitting
-        if (goodMatchesIFound.size() > acceptedMatches.size()) { // TODO make these copies shallow
-            acceptedMatches = goodMatchesIFound;
-            bestTf = t2v(tf);
-            unmatchedLocals = unmatchedPoints;
-            // TODO maybe preserve the polygon associations used here for logging later  
-        }
-    }
-}
-
-
-Eigen::Matrix4d matchesToCloudTf(const Points& localLandmarks, const Points& globalLandmarks, const std::vector<std::pair<Eigen::Index, Eigen::Index>>& pointMatchRefs, const std::vector<int>& indices, int numMatches) {
-    Eigen::MatrixXd A(numMatches+numMatches, 4);
-    Eigen::VectorXd b(numMatches+numMatches);
-    // TODO if not all matches valid, count how many of them are, then do conservativeResize at the end to crop out extra space
-
-    // https://math.stackexchange.com/questions/77462/finding-transformation-matrix-between-two-2d-coordinate-frames-pixel-plane-to
-    int startRow = 0;
-    for (int i = 0; i < numMatches; ++i) {
-        // TODO perform more elegant block assignments here
-        Eigen::Index lIdx = pointMatchRefs.at(indices.at(i)).first, gIdx = pointMatchRefs.at(indices.at(i)).second;
-        A.row(startRow)   = (Eigen::RowVector4d() << localLandmarks(0, lIdx), -localLandmarks(1, lIdx), 1, 0).finished();
-        A.row(startRow+1) = (Eigen::RowVector4d() << localLandmarks(1, lIdx),  localLandmarks(0, lIdx), 0, 1).finished();
-        b[startRow]   = globalLandmarks(0, gIdx);
-        b[startRow+1] = globalLandmarks(1, gIdx);
-        startRow += 2;
-    }
-
-    // https://www.cs.cmu.edu/~16385/s17/Slides/10.1_2D_Alignment__LLS.pdf <-- slide 24
-    // x = (A^T A)^-1 A^T b
-    Eigen::Vector4d x = (A.transpose() * A).inverse() * A.transpose() * b;
-
-    // Return the 4x4 matrix to transform frames: reference --> target
-    return Eigen::Matrix4d{
-        {x[0], -x[1], 0, x[2]},
-        {x[1],  x[0], 0, x[3]},
-        {   0,     0, 1,    0},
-        {   0,     0, 0,    1}
-    };
-}
-
-
 void estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
         const std::vector<std::pair<Eigen::Index, Eigen::Index>>& allMatches,
         std::unordered_map<Eigen::Index, std::pair<Eigen::Index, PtLoc>>& acceptedMatches,
@@ -612,7 +546,7 @@ SLAMGraph g;
 Eigen::Vector3d mostRecentGlobalPose; // if not tracking updates to all previous robot poses
 bool isDebug = false, isOutput = false, pyPub = false;
 double polyMatchThresh, polyMatchThreshStep, reqMatchedPolygonRatio, ransacValidAssocThresh, ransacMatchRatio, ptAssocThresh;
-int numSideBoundsForMatch, ransacMaxIter, ransacMatchPrereq, associationWindowSize, numOptimizations = 0;
+int numSideBoundsForMatch, ransacMaxIter, ransacMatchPrereq, ransacMatchSampleSize, associationWindowSize, numOptimizations = 0;
 std::string outputPath;
 
 // Association network
@@ -635,7 +569,7 @@ bool canFormKClique(const AssocSet& a, const AssocSet& b, const int &k) {
     return count >= k;
 }
 
-void deleteTreeAssoc(std::unordered_map<PointRef, AssocSet, hash_pair> map, PointRef treeRefToDelete) {
+void deleteTreeAssoc(std::unordered_map<PointRef, AssocSet, hash_pair>& map, PointRef treeRefToDelete) {
     for (const PointRef& pf : map[treeRefToDelete]) if (!(treeRefToDelete == pf)) map[pf].erase(treeRefToDelete);
     map.erase(treeRefToDelete);
 }
@@ -763,7 +697,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                         bestGlobalRobotPose, 
                         unmatchedGlobalPoints, 
                         ransacMaxIter, 
-                        ransacMatchPrereq, 
+                        ransacMatchSampleSize, 
                         ransacValidAssocThresh, 
                         ransacMatchRatio);
 
@@ -782,7 +716,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             uasOut.close();
         }
         if (isDebug) {
-            std::cout << "Final association count is " << goodAssociationMap.size() << ", and the number of new landmarks is " << unmatchedGlobalPoints.size() << std::endl;
+            std::cout << "Final association count is " << goodAssociationMap.size() << ", and " << unmatchedGlobalPoints.size() << " point(s) will be added to the association network." << std::endl;
             std::cout << "Estimated best global robot pose: " << bestGlobalRobotPose.transpose() << std::endl;
             // std::cout << "Final estimated tf:\n" << v2t(bestGlobalRobotPose) << std::endl;
         }
@@ -794,7 +728,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // Store both the local and global positions of unmatched landmarks
         // idx 0,n = global; n+1,2n = local
         int numUnmatchedLdmks = unmatchedGlobalPoints.size(), ldmkRefIdx = 0; // reference idx
-        Points keyframePoints(2, numUnmatchedLdmks + numUnmatchedLdmks);
+        Points keyframePoints = Eigen::MatrixXd::Zero(2, numUnmatchedLdmks + numUnmatchedLdmks);
         std::vector<std::pair<PtLoc, AssocSet>> newlyEstablishedLandmarkObservations;
 
 
@@ -805,19 +739,30 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             keyframePoints.col(ldmkRefIdx) = globalPoint;
             keyframePoints.col(numUnmatchedLdmks+ldmkRefIdx) = localObs.landmarks.col(lIdx);
 
+            // std::cout << "Processing PF: {"<< numOptimizations << "," << ldmkRefIdx <<"}" << std::endl;
             PointRef pf = {numOptimizations, ldmkRefIdx++}; // {"frameID", ldmkIdx}
             AssocSet newAssociations;
+            
+            // std::cout << "Current keyframePoints:\n" << keyframePoints << std::endl;
 
             // Attempt to associate the "Tree" with every point from previous observations in the active window
             for (auto& [observedTreeRef, associatedTreeRefs] : unresolvedLandmarks) {
                 if (observedTreeRef.first == pf.first) continue;    // Do not associate points in the same frame
 
+                // std::cout << "Associating with {"<< observedTreeRef.first << "," << observedTreeRef.second <<"}, ";
+                // std::cout << "whose position is "<< activeObsWindow[observedTreeRef.first].col(observedTreeRef.second).transpose();
+
                 // Using max feature distance instead of euclidean distance for increased speed
                 if (((activeObsWindow[observedTreeRef.first].col(observedTreeRef.second) - keyframePoints.col(pf.second)).array().abs() < ptAssocThresh).all()) {
                     associatedTreeRefs.insert(pf);
                     newAssociations.insert(observedTreeRef);
+                    // std::cout << "      YES";
                 }
+                // std::cout << std::endl;
             }
+
+            // std::cout << "===================================================" << std::endl;
+            // std::cout << "Associated with " << newAssociations.size() << " points from previous frames." << std::endl;
 
             // Check if the newly-observed tree has enough associated observations to establish a new landmark
             newAssociations.insert(pf);
@@ -853,6 +798,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                     establishedLdmk += (essentialTree.first == numOptimizations ? keyframePoints : activeObsWindow[essentialTree.first]).col(essentialTree.second);
                 } 
                 newlyEstablishedLandmarkObservations.push_back({establishedLdmk / associationWindowSize, maxSubset});
+                if (isDebug) std::cout << "NEW LANDMARK ESTABLISHED AT " << (establishedLdmk / associationWindowSize).transpose() << std::endl;
             }
         }
 
@@ -864,24 +810,22 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // GraphSLAM Update
         // %%%%%%%%%%%%%%%%
 
-        Eigen::VectorXi existingLdmkIds(matchingPointIndices.size()), newLdmkIds(unmatchedGlobalPoints.size());
+        std::vector<int> existingLdmkIds, newLdmkIds;
 
         // Define a new node and edge for the robot's estimated odometry
         g.addPPEdge(bestGlobalRobotPose);
 
         // Add constraints for all local points that matched with existing landmarks
-        int tmpIdx = 0;
         for (const auto& [lIdx, gIdx] : matchingPointIndices) {
             g.addPLEdge(gIdx, localObs.landmarks.col(lIdx));
-            existingLdmkIds(tmpIdx++) = gIdx;
+            existingLdmkIds.push_back(gIdx);
         }
 
-        // Add new landmark nodes (if any) and add constraints to their original observations 
-        tmpIdx = 0;
+        // Add new landmark nodes (if any) and add constraints to their original observations
         for (const auto& [globalPoint, as] : newlyEstablishedLandmarkObservations) {
             // Define the new landmark
             int newId = g.addLandmarkNode(globalPoint);
-            newLdmkIds(tmpIdx++) = newId;
+            newLdmkIds.push_back(newId);
 
             // Retroactively create constraints from the original observations
             for (const auto& [poseNodeIdx, ldmkRefIdx] : as) {
@@ -894,7 +838,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // Publish graph state before optimization
         std::stringstream graphStream;
         
-        tmpIdx = 0;     // Poses
+        int tmpIdx = 0; // Poses
         for (const auto& pn : g.poseNodeList) graphStream << (tmpIdx++!=0 ? ":": "") << pn.pose(0) << " " << pn.pose(1) << " " << pn.pose(2);
 
         graphStream << "|";
@@ -981,6 +925,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     // Increment to indicate the graph has been updated once
     // Also corresponds to the number of pose nodes in the graph 
     ++numOptimizations;
+    if (isDebug) std::cout << "-------------------------------------------------------------------" << std::endl;
 
     // Print the graph to a file (for debugging)
     if (isOutput) {
@@ -1057,7 +1002,8 @@ int main(int argc, char **argv) {
     
     // Data association filtering parameters
     ransacMaxIter = n.param("ransacMaxIter", 20);
-    ransacMatchPrereq = n.param("ransacMatchPrereq", 4);
+    ransacMatchPrereq = n.param("ransacMatchPrereq", 16);
+    ransacMatchSampleSize = n.param("ransacMatchSampleSize", 4);
     ransacValidAssocThresh = n.param("ransacValidAssocThresh", 1.0); // meters
     ransacMatchRatio = n.param("ransacMatchRatio", 1.0);
 

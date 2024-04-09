@@ -72,46 +72,48 @@ from matplotlib.patches import ConnectionPatch
 #     fig.canvas.draw()
 
 
-numFrames = 0
 fig=plt.figure()
 
-
-def read_graph(data: String):
-    global numFrames
+varthing = 180 / np.pi
+def draw_graph(data: String):
+    global graphFrames
     fig.clf()
 
     # poses | landmark positions | existing ldmk refs | new ldmk refs | previous global error
     poses, ldmkPos, exLdmkRefs, newLdmkRefs, glError = tuple(data.data.split("|"))
 
-    # Parse and plot the poses
-    for i, pose in enumerate(poses.split(":")):
-        poseX,poseY,radians = tuple(map(float, pose.split(" ")))
-        fig.gca().plot(poseX, poseY, ('c' if i<numFrames else 'k'), marker=(3,0, 180*radians/np.pi))
-    
+    # Parse robot poses and landmarks
+    poseList = [tuple(map(float, pose.split(" "))) for pose in poses.split(":")]
+    ldmkList = [tuple(map(float, ldmk.split(" "))) for ldmk in ldmkPos.split(":")]
+
     # Prepare landmark references
     exLdmkRefs = set(map(int, exLdmkRefs.split(" "))) if exLdmkRefs else set()
     newLdmkRefs = set(map(int, newLdmkRefs.split(" "))) if newLdmkRefs else set()
 
-    # make sure no overlap
-    assert(not (exLdmkRefs & newLdmkRefs))
+    # rospy.loginfo(newLdmkRefs)
 
-    # Parse and plot landmarks
-    for i, ldmk in enumerate(ldmkPos.split(":")):
-        x,y = tuple(map(float, ldmk.split(" ")))
+    # Draw lines to landmarks matched in this keyframe
+    for i, (x,y) in enumerate(ldmkList):
         if i in exLdmkRefs:
-            fig.gca().plot(x, y, color='m', marker='o')
-            fig.gca().plot([poseX, x], [poseY, y], color='m', linestyle="-")
+            fig.gca().plot([poseList[-1][0], x], [poseList[-1][1], y], color='g', linestyle="-")
         elif i in newLdmkRefs:
-            fig.gca().plot(x, y, color='purple', marker='o')
-            fig.gca().plot([poseX, x], [poseY, y], color='purple', linestyle="-")
-        else:
-            fig.gca().plot(x, y, 'ro')
+            fig.gca().plot([poseList[-1][0], x], [poseList[-1][1], y], color='purple', linestyle="-")
 
+    # Draw landmark markers
+    for i, (x,y) in enumerate(ldmkList):
+        if i in exLdmkRefs: fig.gca().plot(x, y, color='g', marker='o')
+        elif i in newLdmkRefs: fig.gca().plot(x, y, color='purple', marker='o')
+        else: fig.gca().plot(x, y, 'ro')
+
+    # Draw latest poses
+    for i, (poseX,poseY,radians) in enumerate(poseList):
+        fig.gca().plot(poseX, poseY, ('b' if i<len(poseList)-1 else 'k'), marker=(3,0, varthing*radians))
+    
 
     # Define plot title and draw
-    fig.gca().set_title(f"{i} Total Trees | Frame {numFrames} -> {len(exLdmkRefs) + len(newLdmkRefs)} Trees | Existing Error: {glError}")
+    fig.gca().set_title(f"Frame {len(poseList)} | {len(exLdmkRefs)} Assoc; {len(newLdmkRefs)} New | Existing Error: {glError}")
     plt.draw()
-    numFrames += 1
+
 
 
 
@@ -122,7 +124,7 @@ def read_graph(data: String):
 def listener():
     # global obsRange, cx, cy, ox, oy
     rospy.init_node('graph_display')
-    rospy.Subscriber("/graph_builder/graph", String, read_graph)
+    rospy.Subscriber("/graph_builder/graph", String, draw_graph)
     # obsRange = rospy.get_param("/sim_path/observationRange", obsRange)
     # cW = rospy.get_param("/sim_path/collisionRadius", 0)
     fig.canvas.set_window_title("Global Graph")
