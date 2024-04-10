@@ -398,7 +398,7 @@ struct SLAMGraph {
         // Copy data from the state vector into graph nodes (for easier access)
         for (auto& node : poseNodeList) node.pose = stateVector.segment(node.stateVectorIdx, 3);
         for (auto& node : landmarkNodeList) geoHier->landmarks.col(node.globalReprIdx) = stateVector.segment(node.stateVectorIdx, 2);
-        std::cout << "New global error: " << computeGlobalError() << std::endl;
+        std::cout << "New global error: " << computeGlobalError();
 
         return goodChange;
     }
@@ -447,7 +447,7 @@ Eigen::Matrix3d tfFromSubsetMatches(const Points& localLandmarks, const Points& 
     // x = (A^T A)^-1 A^T b
     Eigen::Vector4d x = (A.transpose() * A).inverse() * A.transpose() * b;
 
-    // Return the 4x4 matrix to transform frames: reference --> target
+    // Return the 3x3 matrix to transform frames: reference --> target
     return Eigen::Matrix3d{
         {x[0], -x[1], x[2]},
         {x[1],  x[0], x[3]},
@@ -497,6 +497,7 @@ void estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
 {
     std::random_device randomDevice;
     std::mt19937 rng(randomDevice());
+    rng.seed(10);
     
     // Init indices to access the matches
     std::vector<int> indices(allMatches.size());
@@ -714,7 +715,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             matOut.close();
         }
 
-        std::cout << "If I were to use all these matches, I'd end up with this transform:\n" << computeRigid2DEuclidTf(localObs.landmarks, g.geoHier->landmarks, matchingPointIndices) << std::endl;
+        // std::cout << "If I were to use all these matches, I'd end up with this transform:\n" << computeRigid2DEuclidTf(localObs.landmarks, g.geoHier->landmarks, matchingPointIndices) << std::endl;
 
         // %%%%%%%%%%%%%%%%%%%%
         // Transform Estimation
