@@ -11,6 +11,15 @@
 
     <!-- Local Bundle Adjustment Node -->
     <node pkg="urquhart" type="KeyframeGen" name="keyframe_maker" output="screen" />
+    <group ns="keyframe_maker">
+        <!-- <node pkg="urquhart" type="live_gh.py" name="gh_display" output="screen" /> -->
+        <!-- <node pkg="urquhart" type="live_pc.py" name="baseframe_display" output="screen">
+            <param name="topicName" value="allPoints" />
+        </node> -->
+        <!-- <node pkg="urquhart" type="live_pc.py" name="keyframe_display" output="screen">
+            <param name="topicName" value="keyframe" />
+        </node> -->
+    </group>
 
     <!-- Global GraphSLAM Node -->
     <node pkg="urquhart" type="PolygonSLAM" name="graph_builder" output="screen" />

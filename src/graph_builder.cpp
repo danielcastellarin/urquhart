@@ -245,7 +245,7 @@ struct SLAMGraph {
         plEdges.push_back(PLEdge(poseNodeIdx, globalLandmarkIdx, landmarkLocalPosition));
     }
 
-    void computeGlobalError() {
+    double computeGlobalError() {
         double gErr = 0;
 
         for (const auto& edge : ppEdges) {
@@ -271,10 +271,10 @@ struct SLAMGraph {
             gErr += eIJ.transpose() * edge.info * eIJ;
         }
 
-        globalErrors.push_back(gErr);
+        return gErr;
     }
 
-    void optimizeGraph() {
+    bool optimizeGraph() {
         
         // Initialize sparse system H and coefficient vector b with zeroes
         Eigen::MatrixXd H = Eigen::MatrixXd::Zero(stateVector.size(), stateVector.size());
@@ -364,13 +364,43 @@ struct SLAMGraph {
             H(jSlice, jSlice) += B.transpose() * edge.info * B;
         }
 
+        // Solve linear system
+        Eigen::VectorXd dx = H.llt().solve(b);
+        // std::cout << "sv: " << stateVector.transpose() << std::endl;
+        // std::cout << "dx: " << dx.transpose() << std::endl;
+        bool goodChange = true;
+
+        // Validate output: make sure nothing changed too much
+        Eigen::Vector3d diffPose;
+        for (const auto& node : poseNodeList) {
+            diffPose = dx.segment(node.stateVectorIdx, 3);
+            if (std::abs(diffPose(0)) > 2 || std::abs(diffPose(1)) > 2 || std::abs(diffPose(2)) > 0.5) {
+                std::cout << "Pose node " << node.id << " changed to much, (" << diffPose.transpose() << "), cancelling optimization!!" << std::endl;
+                goodChange = false;
+            }
+        }
+
+        PtLoc diffPosition;
+        for (const auto& node : landmarkNodeList) {
+            diffPosition = dx.segment(node.stateVectorIdx, 2);
+            if (std::abs(diffPosition(0)) > 4 || std::abs(diffPosition(1)) > 4) {
+                std::cout << "Landmark node " << node.globalReprIdx << " changed to much, (" << diffPosition.transpose() << "), cancelling optimization!!" << std::endl;
+                goodChange = false;
+            }
+        }
+        // if ((dx.array().abs() > 2).any()) return false;
+
 
         // Update the state vector; according to the result of the system of equations
-        stateVector -= H.llt().solve(b);
+        // stateVector -= H.llt().solve(b);
+        stateVector -= dx;
 
         // Copy data from the state vector into graph nodes (for easier access)
         for (auto& node : poseNodeList) node.pose = stateVector.segment(node.stateVectorIdx, 3);
         for (auto& node : landmarkNodeList) geoHier->landmarks.col(node.globalReprIdx) = stateVector.segment(node.stateVectorIdx, 2);
+        std::cout << "New global error: " << computeGlobalError() << std::endl;
+
+        return goodChange;
     }
 
     void writeGraphToFiles(std::string filePath, std::string fileName) {
@@ -385,7 +415,7 @@ struct SLAMGraph {
         for (const auto& ple : plEdges) edgesOut << "P" << ple.src << " L" << ple.dst << " " << ple.distance.transpose() << std::endl;
 
         // Save global error to single file (overwriting)
-        computeGlobalError();
+        globalErrors.push_back(computeGlobalError());
         for (const auto& ge : globalErrors) errOut << ge << std::endl;
 
         nodesOut.close();
@@ -498,14 +528,14 @@ void estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
 
             // Obtain that point's squared distance to each global landmark 
             // Eigen::VectorXd sqDists = squaredDistanceToPoint(globalLandmarks, globalPoint);
-            Eigen::VectorXd sqDists = euclideanDistanceToPoint(globalLandmarks, globalPoint);
+            Eigen::VectorXd eucDists = euclideanDistanceToPoint(globalLandmarks, globalPoint);
 
             // Make an association with the nearest neighbor within a threshold
-            if ((sqDists.array() < threshForValidAssoc).any()) {
+            if ((eucDists.array() < threshForValidAssoc).any()) {
             // if ((sqDists.array() < threshForValidAssoc).count() > 0) {
                 // Ensure the closest landmark has not already been matched with something
                 Eigen::Index closestLandmarkIdx;
-                sqDists.minCoeff(&closestLandmarkIdx);
+                eucDists.minCoeff(&closestLandmarkIdx);
 
                 // Ignore the association if the closest global point was already the source of conflict with other local points
                 if (problematicGlobals.find(closestLandmarkIdx) != problematicGlobals.end()) {
@@ -523,14 +553,8 @@ void estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
                     invertedGoodMatchesSoFar[closestLandmarkIdx] = {lIdx, globalPoint};
                 }
 
-            // Do nothing with this point if any global point is in "no-man's land" range of this point
-            } else if ((sqDists.array() < threshForAssocNetEligibility).any()) {
-
-            } else unmatchedPoints.push_back({lIdx, globalPoint});
-            
-            // // Elect this point for the association network if it is too far away from everything else
-            // } else if ((threshForAssocNetEligibility < sqDists.array()).all())
-            //     unmatchedPoints.push_back({lIdx, globalPoint});
+            // Elect this point for the association network if it is too far away from everything else
+            } else if ((threshForAssocNetEligibility <= eucDists.array()).all()) unmatchedPoints.push_back({lIdx, globalPoint});
         }
         
         // Keep this result if we have not seen anything more fitting
@@ -834,7 +858,6 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
             // Retroactively create constraints from the original observations
             for (const auto& [poseNodeIdx, ldmkRefIdx] : as) {
-                // int pointSetSize = activeObsWindow[poseNodeIdx].cols()/2;
                 int pointSetSize = activeObsWindow[poseNodeIdx].cols() >> 1;
                 g.addPLEdge(poseNodeIdx, newId, activeObsWindow[poseNodeIdx].col(pointSetSize + ldmkRefIdx));
             }
@@ -874,7 +897,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Optimize the graph once
         if (isDebug) std::cout << "Optimizing graph... ";
-        g.optimizeGraph();
+        bool isGood = g.optimizeGraph();
+        if (!isGood) abort();
         if (isDebug) std::cout << "   Done!" << std::endl;
 
         // TODO add verbose debug option

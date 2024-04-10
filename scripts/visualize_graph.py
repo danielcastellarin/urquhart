@@ -44,12 +44,12 @@ def display_things(plt_axis, dirname, frameID):
     plt_axis.set_title(f"{len(ldmkNodes)} Trees | Frame {frameID} | Error {gError}")
 
     # Draw cyan lines between robot poses
-    for src, dst, distance in ppEdges:
-        plt_axis.plot([poseNodes[src][0], poseNodes[dst][0]], [poseNodes[src][1], poseNodes[dst][1]], 'c,-' )
+    # for src, dst, distance in ppEdges:
+    #     plt_axis.plot([poseNodes[src][0], poseNodes[dst][0]], [poseNodes[src][1], poseNodes[dst][1]], 'c,-' )
     
-    # Draw green lines to represent tree observations
-    for src, dst, distance in plEdges:
-        plt_axis.plot([poseNodes[src][0], ldmkNodes[dst][0]], [poseNodes[src][1], ldmkNodes[dst][1]], 'g,-' )
+    # # Draw green lines to represent tree observations
+    # for src, dst, distance in plEdges:
+    #     plt_axis.plot([poseNodes[src][0], ldmkNodes[dst][0]], [poseNodes[src][1], ldmkNodes[dst][1]], 'g,-' )
     
     # Show blue arrows for poses
     for x,y,radians in poseNodes.values(): plt_axis.plot(x, y, 'b', marker=(3,0, 180*radians/np.pi))

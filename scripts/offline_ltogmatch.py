@@ -91,9 +91,9 @@ def draw_vis():
         for line in open(f'{directory}/finalAssoc/{frameID}m.txt'):
             if line == '': continue
             p1, p2 = [tuple(map(float, c.split(','))) for c in line.split('|')]
-            ax[0][1].add_artist(ConnectionPatch(xyA=p1, xyB=p2, coordsA="data", coordsB="data", axesA=ax[0][0], axesB=ax[0][1], color="magenta"))
-            ax[0][1].plot(p2[0], p2[1], color="m", marker="o")
-            ax[0][0].plot(p1[0], p1[1], color="m", marker="o")
+            ax[0][1].add_artist(ConnectionPatch(xyA=p1, xyB=p2, coordsA="data", coordsB="data", axesA=ax[0][0], axesB=ax[0][1], color="g"))
+            ax[0][1].plot(p2[0], p2[1], color="g", marker="o")
+            ax[0][0].plot(p1[0], p1[1], color="g", marker="o")
         
         for line in open(f'{directory}/finalAssoc/{frameID}u.txt'):
             if line == '': continue
