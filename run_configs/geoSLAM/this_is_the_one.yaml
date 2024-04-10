@@ -9,7 +9,7 @@ sim_path:
   treePositionStandardDeviation: 0.1
   # landmarkAssociationThreshold: 0.8
   # treeAssociationThreshold: 0.5
-  pubRate: 4
+  pubRate: 5
   outputDirName: serious_circle
   randomSeed: 17
   debug: false
@@ -34,12 +34,12 @@ graph_builder:
   numSideBoundsForMatch: 3
   reqMatchedPolygonRatio: 0.75   # TODO maybe increase this
   
-  ransacMaxIter: 50
+  ransacMaxIter: 100
   ransacMatchPrereq: 16         # relatively high, we want a lot of matches to sample from
   ransacMatchSampleSize: 2      # low as possible, want each sample to have low probability to have poor match affecting TF
   ransacValidAssocThresh: .05   # EXTREMELY LOW, only want to match points we that CERTAINLY match
   ransacAssocNetThresh: 2.5     # this should be a little below the average distance between nearest neighbor trees
-  ransacMatchRatio: 1.0         # percentage of landmark matches to cause an early exit from RANSAC
+  ransacMatchRatio: 0.9         # percentage of landmark matches to cause an early exit from RANSAC
 
   minAssocForNewLdmk: 3         # relatively low, we want to discover new trees fast
   associationWindowSize: 4      # close to ^^, we want easily repeatable observations

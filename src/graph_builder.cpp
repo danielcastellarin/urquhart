@@ -274,6 +274,54 @@ struct SLAMGraph {
         return gErr;
     }
 
+    double saveGlobalError(std::string filePath, std::string fileName) {
+        double gErr = 0;
+
+        std::ofstream allErrOut(filePath+"/err/"+fileName);
+
+        for (const auto& edge : ppEdges) {
+            int iStart = poseNodeList[edge.src].stateVectorIdx, jStart = poseNodeList[edge.dst].stateVectorIdx;
+            Eigen::Vector3d xI(stateVector.segment(iStart, 3)), xJ(stateVector.segment(jStart, 3)), eIJ;
+            Eigen::Matrix3d XI = v2t(xI), XJ = v2t(xJ), ZIJ = v2t(edge.distance);
+            Eigen::Matrix3d XI_inv = XI.inverse(), ZIJ_inv = ZIJ.inverse();
+
+            eIJ = t2v(ZIJ_inv * (XI_inv * XJ)); // NOTE previous 5 lines are verbatim from eIJ calc when optimizing graph; make function
+            double eVal = eIJ.transpose() * edge.info * eIJ;
+            allErrOut << "P" << edge.src << " P" << edge.dst << " " << eVal << std::endl;
+            gErr += eVal;
+        }
+
+        allErrOut << "===================================" << std::endl;
+
+
+        std::map<int, double> errByPose;
+        for (const auto& edge : plEdges) {
+            int iStart = poseNodeList[edge.src].stateVectorIdx, jStart = landmarkNodeList[edge.dst].stateVectorIdx;
+            Eigen::Vector3d x(stateVector.segment(iStart, 3));
+            Eigen::Vector2d l(stateVector.segment(jStart, 2)), eIJ;
+            double s = sin(x(2)), c = cos(x(2));
+            Eigen::Matrix2d R_transposed {
+                { c, s},
+                {-s, c}
+            };
+            eIJ = (R_transposed * (l - x.head(2))) - edge.distance; // 2x1
+            double eVal = eIJ.transpose() * edge.info * eIJ;
+
+            if (errByPose.find(edge.src) == errByPose.end()) errByPose[edge.src] = eVal;
+            else errByPose[edge.src] += eVal;
+
+            allErrOut << "P" << edge.src << " L" << edge.dst << " " << eVal << std::endl;
+            gErr += eVal;
+        }
+        
+        allErrOut << "===================================" << std::endl;
+        for (const auto& [src, totErr] : errByPose) allErrOut << "P" << src << ": " << totErr << std::endl;
+
+        allErrOut.close();
+
+        return gErr;
+    }
+
     bool optimizeGraph() {
         
         // Initialize sparse system H and coefficient vector b with zeroes
@@ -416,6 +464,7 @@ struct SLAMGraph {
 
         // Save global error to single file (overwriting)
         globalErrors.push_back(computeGlobalError());
+        // globalErrors.push_back(saveGlobalError(filePath, fileName));
         for (const auto& ge : globalErrors) errOut << ge << std::endl;
 
         nodesOut.close();
@@ -497,7 +546,7 @@ void estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
 {
     std::random_device randomDevice;
     std::mt19937 rng(randomDevice());
-    rng.seed(10);
+    // rng.seed(10);
     
     // Init indices to access the matches
     std::vector<int> indices(allMatches.size());
@@ -566,11 +615,11 @@ void estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
         }
     }
 
-    // TODO unsure if this is necessary anymore
-    // if for some reason no matches were accepted, set the tf to be the original estimated by all the naive GH matches
-    if (acceptedMatches.empty()) {
-        bestTf = t2v(tfFromSubsetMatches(localLandmarks, globalLandmarks, allMatches, indices, allMatches.size()));
-    }
+    // // TODO unsure if this is necessary anymore
+    // // if for some reason no matches were accepted, set the tf to be the original estimated by all the naive GH matches
+    // if (acceptedMatches.empty()) {
+    //     bestTf = t2v(tfFromSubsetMatches(localLandmarks, globalLandmarks, allMatches, indices, allMatches.size()));
+    // }
 }
 
 
@@ -846,8 +895,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         g.addPPEdge(bestGlobalRobotPose);
 
         // Add constraints for all local points that matched with existing landmarks
-        for (const auto& [lIdx, gIdx] : matchingPointIndices) {
-            g.addPLEdge(gIdx, localObs.landmarks.col(lIdx));
+        for (const auto& [gIdx, localInGlobal] : goodAssociationMap) {
+            g.addPLEdge(gIdx, localObs.landmarks.col(localInGlobal.first));
             existingLdmkIds.push_back(gIdx);
         }
 
@@ -901,6 +950,9 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         bool isGood = g.optimizeGraph();
         if (!isGood) abort();
         if (isDebug) std::cout << "   Done!" << std::endl;
+
+        if (isDebug) std::cout << "Now, we think the robot's pose is " << g.poseNodeList.back().pose.transpose() << std::endl;
+
 
         // TODO add verbose debug option
         // if (isDebug) std::cout << "Optimized tree positions:\n" << g.geoHier->landmarks.transpose() << std::endl;
@@ -1059,6 +1111,7 @@ int main(int argc, char **argv) {
         std::filesystem::create_directory(outputPath+"/global/h");
         std::filesystem::create_directory(outputPath+"/global/graph_nodes");
         std::filesystem::create_directory(outputPath+"/global/graph_edges");
+        // std::filesystem::create_directory(outputPath+"/global/err");
         std::filesystem::create_directory(outputPath+"/local");
         std::filesystem::create_directory(outputPath+"/local/p");
         std::filesystem::create_directory(outputPath+"/local/d");
