@@ -35,10 +35,12 @@ graph_builder:
   reqMatchedPolygonRatio: 0.5
   
   ransacMaxIter: 50
-  ransacMatchPrereq: 18
+  ransacMatchPrereq: 20
   ransacMatchSampleSize: 4
-  ransacValidAssocThresh: 0.5
+  ransacValidAssocThresh: .25
+  ransacAssocNetThresh: 2.0
   ransacMatchRatio: 1
 
+  minAssocForNewLdmk: 5
   associationWindowSize: 8
-  ptAssocThresh: 0.5
+  ptAssocThresh: 0.25

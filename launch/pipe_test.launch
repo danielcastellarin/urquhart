@@ -2,11 +2,12 @@
 <launch>
     <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/big_square.yaml" command="load" /> -->
     <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/config_that_works.yaml" command="load" /> -->
-    <rosparam file="$(find urquhart)/run_configs/geoSLAM/very_close.yaml" command="load" />
+    <rosparam file="$(find urquhart)/run_configs/geoSLAM/this_is_the_one.yaml" command="load" />
     
     
     <!-- Simulate robot observations -->
     <node pkg="urquhart" type="ultimate_path" name="sim_path" output="screen" />
+    <node pkg="urquhart" type="live_truth_display.py" name="live_true" output="screen" />
 
     <!-- Local Bundle Adjustment Node -->
     <node pkg="urquhart" type="KeyframeGen" name="keyframe_maker" output="screen" />

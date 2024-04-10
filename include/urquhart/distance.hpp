@@ -54,6 +54,10 @@ inline Eigen::VectorXd squaredDistanceToPoint(const Points& landmarks, const PtL
   return (landmarks.colwise() - point).array().square().colwise().sum();
 }
 
+inline Eigen::VectorXd euclideanDistanceToPoint(const Points& landmarks, const PtLoc& point) {
+  return (landmarks.colwise() - point).array().square().colwise().sum().sqrt();
+}
+
 // inline Eigen::ArrayXi findClosestLdmksUnderThreshToPoint(const Points& landmarks, const PtLoc& point, double thresh) {
 //   Eigen::Array<bool, -1, 1> mask = squaredDistanceToPoint(landmarks, point).array() < thresh;
 //   Eigen::ArrayXi mask_idcs(mask.count(), 1);
