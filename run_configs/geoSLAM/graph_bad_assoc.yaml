@@ -1,4 +1,4 @@
-outputDirName: keyframe_crash
+outputDirName: graph_bad_assoc
 logging: true
 
 sim_path:
@@ -13,8 +13,8 @@ sim_path:
   # landmarkAssociationThreshold: 0.8
   # treeAssociationThreshold: 0.5
   pubRate: 5
-  debug: false
   # randomSeed: 17
+  debug: false
   startPoseX: 207.711439
   startPoseY: 572.939079
   startPoseTheta: 3.091586

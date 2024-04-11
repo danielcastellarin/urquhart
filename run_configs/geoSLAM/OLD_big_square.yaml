@@ -1,3 +1,6 @@
+outputDirName: GSLAM_ss
+logging: false
+
 sim_path:
   forestFile: coolForest.txt    # local from 'urquhart' package
   pathType: square
@@ -10,7 +13,6 @@ sim_path:
   # landmarkAssociationThreshold: 0.8
   # treeAssociationThreshold: 0.5
   pubRate: 0.5
-  outputDirName: serious_square
   randomSeed: 16
   debug: false
 
@@ -24,9 +26,7 @@ keyframe_maker:
   clusterTolerance: 0.3
 
 graph_builder:
-  outputDirName: GSLAM_ss
   consoleDebug: false
-  logging: false
   realtimeVis: true
   polyMatchThreshStart: 0.5
   polyMatchThreshStep: 0.25

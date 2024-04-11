@@ -21,7 +21,7 @@ struct SimConfig
     successfulObservationProbability, treePositionStandardDeviation, treeRadiusStandardDeviation,
     pubRate;
     int initializationAttempts, numObservationsForValidLandmark, randomSeed;
-    bool givenStartPose = false;
+    bool givenStartPose = false, isLogging = false;
     Pose initialPose;
     std::string outputDirName;
 
@@ -55,8 +55,10 @@ struct SimConfig
         initializationAttempts = nh.param("initializationAttempts", 10000);
         numObservationsForValidLandmark = nh.param("initializationAttempts", 5);
         randomSeed = nh.param("randomSeed", -1);
-        nh.param<std::string>("outputDirName", outputDirName, "testOutput");
 
+        // Setup logging (if necessary)
+        isLogging = nh.param("/logging", false);
+        nh.param<std::string>("/outputDirName", outputDirName, "testOutput");
         outputDirPath = absolutePackagePath+"output/"+outputDirName;
         globalPointsPath = outputDirPath+"/global_obs/";
         localPointsPath = outputDirPath+"/local_obs/";

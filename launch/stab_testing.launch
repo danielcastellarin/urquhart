@@ -5,6 +5,7 @@
     <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/circle_edgemap.yaml" command="load" /> -->
     <rosparam file="$(find urquhart)/run_configs/geoSLAM/stab_test1.yaml" command="load" />
     <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/graph_bad_assoc.yaml" command="load" /> -->
+    <node pkg="urquhart" type="CreateLogs" name="log_setup" output="screen" />
     
     
     <!-- Simulate robot observations -->
@@ -18,13 +19,14 @@
         <!-- <node pkg="urquhart" type="live_pc.py" name="baseframe_display" output="screen">
             <param name="topicName" value="allPoints" />
         </node> -->
-        <!-- <node pkg="urquhart" type="live_pc.py" name="keyframe_display" output="screen">
+        <node pkg="urquhart" type="live_pc.py" name="keyframe_display" output="screen">
             <param name="topicName" value="keyframe" />
-        </node> -->
+        </node>
     </group>
+
 
     <!-- Global GraphSLAM Node -->
     <node pkg="urquhart" type="PolygonSLAM" name="graph_builder" output="screen" />
-    <!-- <node pkg="urquhart" type="ult_live.py" name="global_dash" output="screen" /> -->
     <node pkg="urquhart" type="live_graph.py" name="graph_display" output="screen" />
+    <!-- <node pkg="urquhart" type="ult_live.py" name="global_dash" output="screen" /> -->
 </launch>

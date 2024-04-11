@@ -54,7 +54,9 @@ catkin_package(
    DEPENDS)
 
 
-
+add_executable(CreateLogs src/create_logs.cpp)
+target_include_directories(CreateLogs PUBLIC ${catkin_INCLUDE_DIRS})
+target_link_libraries(CreateLogs PUBLIC ${catkin_LIBRARIES})
 
 
 # Non ROS robot path simulation

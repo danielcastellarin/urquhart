@@ -1,3 +1,6 @@
+outputDirName: circle_edgemap
+logging: false
+
 sim_path:
   forestFile: coolForest.txt    # local from 'urquhart' package
   pathType: circle
@@ -10,7 +13,6 @@ sim_path:
   # landmarkAssociationThreshold: 0.8
   # treeAssociationThreshold: 0.5
   pubRate: 5
-  outputDirName: stab_circle
   # randomSeed: 17
   debug: false
   startPoseX: 859.063596
@@ -27,9 +29,7 @@ keyframe_maker:
   clusterTolerance: 0.4
 
 graph_builder:
-  outputDirName: circle_edgemap
   consoleDebug: false
-  logging: false
   realtimeVis: false
 
   polyMatchThreshStart: 2.0     # Tight polygon match threshold
