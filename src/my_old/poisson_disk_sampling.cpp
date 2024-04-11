@@ -4,9 +4,16 @@
 #include <string>
 #include <algorithm>
 #include <unordered_map>
+#include <filesystem>
 
 #include <iostream>
 #include <fstream>
+
+
+#include <ros/ros.h>
+#include <ros/package.h>
+
+
 
 /*  Design decision note: (Randomization of tree radii)
 
@@ -18,58 +25,18 @@ For now, sampling a uniform distribution will work.
 
 constexpr double PI = 3.14159265358;
 
-// Code should error if invalid run configuration provided
+
 struct ForestConfig
 {
-    // Required Parameters
-    float forestHeight, forestWidth, forestSize, treeSpacing,
-    // Optional Parameters
-    treeRadiusMin = 0, treeRadiusMax = 0,
-    // treeRadiusMean = 0, treeRadiusStdDev = 0,
-    noiseMean = 0, noiseStdDev = 0;
-    int samplingAttempts = 30, randomSeed = -1;
-    std::string outputFileName;
+    float forestHeight, forestWidth, treeSpacing,
+    treeRadiusMin, treeRadiusMax, // treeRadiusMean, treeRadiusStdDev,
+    noiseMean, noiseStdDev;
+    int samplingAttempts, randomSeed;
 
-    // Each config file is designed to be a static run config
-    ForestConfig(std::string path)
-    {
-        // Assume each line is describes a key-value pair (space-separated)
-        std::ifstream infile(path);
-        std::string key,value;
-        std::unordered_map<std::string, std::string> options;
-        while (infile >> key >> value) options[key] = value;
-        infile.close();
-
-        // Required parameters
-        if (options.find("forestSize") != options.end()) {
-            forestSize = atof(options["forestSize"].c_str());
-            forestHeight = forestSize, forestWidth = forestSize;
-        } else {
-            forestHeight = atof(options["forestHeight"].c_str()), forestWidth = atof(options["forestWidth"].c_str());
-            forestSize = forestHeight*forestWidth;
-        }
-        treeSpacing = atof(options["treeSpacing"].c_str());
-
-        // Optional parameters
-        if (options.find("treeRadiusMin") != options.end()) treeRadiusMin = atof(options["treeRadiusMin"].c_str());
-        if (options.find("treeRadiusMax") != options.end()) treeRadiusMax = atof(options["treeRadiusMax"].c_str());
-        // if (options.find("treeRadiusMean") != options.end()) treeRadiusMean = atof(options["treeRadiusMean"].c_str());
-        // if (options.find("treeRadiusStdDev") != options.end()) treeRadiusStdDev = atof(options["treeRadiusStdDev"].c_str());
-        if (options.find("samplingAttempts") != options.end()) samplingAttempts = atoi(options["samplingAttempts"].c_str());
-        if (options.find("noiseMean") != options.end()) noiseMean = atof(options["noiseMean"].c_str());
-        if (options.find("noiseStdDev") != options.end()) noiseStdDev = atof(options["noiseStdDev"].c_str());
-        if (options.find("randomSeed") != options.end()) randomSeed = atoi(options["randomSeed"].c_str());
-        if (options.find("outputFileName") != options.end() && options["outputFileName"].find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890_-") == std::string::npos)
-            outputFileName = options["outputFileName"];
-        else
-            outputFileName = (noiseMean || noiseStdDev ? "noisy-" : std::string("")) + 
-                (forestSize >= 10000 ? "big" : (forestSize > 100 ? "medium" : "small")) + std::string("-") +
-                (treeSpacing >= 10 ? "sparse" : (treeSpacing > 5 ? "avg" : "dense")) + std::string("-forest.txt");
-    }
-    bool isValid() { // TODO
-        // treespacing << forestSize, and both these values are present
-        return treeSpacing && forestSize > treeSpacing + treeRadiusMax + treeRadiusMax;
-    }
+    ForestConfig(float fH, float fW, float tS, float tRMin, float tRMax, float nM, float nSD, int sA, int rS) :
+        forestHeight(fH), forestWidth(fW), treeSpacing(tS), treeRadiusMin(tRMin), treeRadiusMax(tRMax), 
+        noiseMean(nM), noiseStdDev(nSD), samplingAttempts(sA), randomSeed(rS) {}
+    
     void outputConfig(std::ostream& out) { 
         out << "Forest height: " << forestHeight << std::endl;
         out << "Forest width: " << forestWidth << std::endl;
@@ -81,7 +48,7 @@ struct ForestConfig
         out << "Sampling attempts per tree: " << samplingAttempts << std::endl;
         out << "Mean of gaussian sampled when applying noise to tree positions: " << noiseMean << std::endl;
         out << "Standard Deviation of gaussian sampled when applying noise to tree positions: " << noiseStdDev << std::endl;
-        out << "Random seed used: " << (randomSeed == -1 ? "None" : std::to_string(randomSeed)); // << std::endl;
+        out << "Random seed used: " << (randomSeed == -1 ? "None" : std::to_string(randomSeed)) << std::endl;
     }
 };
 
@@ -208,29 +175,54 @@ and 3 m standard deviation.
 */
 
 // units are meters
-int main(int argc, char* argv[]){
-    if (argc > 1) {
-        // Parse config file and display this run's configs
-        ForestConfig cfg(argv[1]);
-        cfg.outputConfig(std::cout);
-        std::cout << std::endl;
+int main(int argc, char* argv[]) {
 
-        if (!cfg.isValid()) return -1;
-        std::vector<Tree> forest = poissonDiskSamplingWithRadius(cfg);
+    // Initialize Node and read in global parameters
+    ros::init(argc, argv, "create_forest");
+    ros::NodeHandle n;
+    std::string forestDirPath = ros::package::getPath("urquhart") + "/forests/";
 
-        // Save this forest environment
-        std::system("mkdir forests");
-        std::ofstream forestOut("forests/"+ cfg.outputFileName, std::ios::trunc);
-        cfg.outputConfig(forestOut);
-        forestOut << std::endl << "Number of trees in forest: " << forest.size() << std::endl;
-        forestOut << "\nRUN COMMAND:";
-        for (int i = 0; i < argc; i++) forestOut << " " << argv[i];
-        forestOut << std::endl << std::endl;
-        for (const Tree& t : forest) forestOut << t.x << " " << t.y << " " << t.radius << std::endl;
-        forestOut.close();
+    // Parameters
+    std::string urqForest;
+    n.param<std::string>("forestName", urqForest, "testForest");
+    
+    // Forest Size & Density
+    float forestSize = n.param("forestSize", 1000.0);
+    float forestHeight = n.param("forestHeight", forestSize);
+    float forestWidth = n.param("forestWidth", forestSize);
+    float treeSpacing = n.param("treeSpacing", 7.0);
 
-    } else {
-        std::cout << "Please provide a configuration file with run parameters for the simulation." << std::endl;
+    // Randomness
+    float noiseMean = n.param("noiseMean", 0.0);
+    float noiseStdDev = n.param("noiseStdDev", 3.0);
+    float treeRadiusMin = n.param("treeRadiusMin", 0.0);
+    float treeRadiusMax = n.param("treeRadiusMax", 0.0);
+    // float treeRadiusMean = n.param("treeRadiusMean", 0.0);
+    // float treeRadiusStdDev = n.param("treeRadiusStdDev", 0.0);
+    int samplingAttempts = n.param("samplingAttempts", 30);
+    int randomSeed = n.param("randomSeed", -1);
+
+    // Ensure the provided forest parameters are valid (treespacing << forestSize)
+    if (treeSpacing + 2*treeRadiusMax >= forestSize) return -1;
+
+    
+    // Create the forest
+    ForestConfig cfg(forestHeight, forestWidth, treeSpacing, treeRadiusMin, treeRadiusMax, noiseMean, noiseStdDev, samplingAttempts, randomSeed);
+    cfg.outputConfig(std::cout);
+    std::vector<Tree> forest = poissonDiskSamplingWithRadius(cfg);
+    
+    
+    // Create folder for the forest if none exists
+    if (!std::filesystem::exists(forestDirPath)) {
+        std::filesystem::create_directory(forestDirPath);
+        std::cout << "Created 'forests' directory." << std::endl;
     }
+    
+    // Save the forest to a file
+    std::ofstream forestOut(forestDirPath + urqForest + ".txt", std::ios::trunc);
+    cfg.outputConfig(forestOut);
+    forestOut << "Number of trees in forest: " << forest.size() << std::endl << std::endl << std::endl;
+    for (const Tree& t : forest) forestOut << t.x << " " << t.y << " " << t.radius << std::endl;
+    forestOut.close();
 }
 

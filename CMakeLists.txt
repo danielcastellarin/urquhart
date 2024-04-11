@@ -58,6 +58,10 @@ add_executable(CreateLogs src/create_logs.cpp)
 target_include_directories(CreateLogs PUBLIC ${catkin_INCLUDE_DIRS})
 target_link_libraries(CreateLogs PUBLIC ${catkin_LIBRARIES})
 
+# ROS forest generator
+add_executable(CreateForest src/my_old/poisson_disk_sampling.cpp)
+target_include_directories(CreateForest PUBLIC ${catkin_INCLUDE_DIRS})
+target_link_libraries(CreateForest PUBLIC ${catkin_LIBRARIES})
 
 # Non ROS robot path simulation
 add_executable(ForestSim
@@ -72,8 +76,6 @@ target_link_libraries(ForestSim PUBLIC ${Boost_LIBRARIES} ${OpenCV_LIBS} ${qhull
 SET_TARGET_PROPERTIES(ForestSim PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
 
 
-# Non ROS forest generator
-add_executable(CreateForest src/my_old/poisson_disk_sampling.cpp)
 
 
 # include_directories(include ${catkin_INCLUDE_DIRS})

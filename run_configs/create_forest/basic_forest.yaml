@@ -1,0 +1,5 @@
+forestSize: 1000
+treeSpacing: 7
+noiseMean: 0
+noiseStdDev: 3
+forestName: urqForest
