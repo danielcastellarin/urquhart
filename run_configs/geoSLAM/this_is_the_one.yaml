@@ -25,9 +25,9 @@ keyframe_maker:
 
 graph_builder:
   outputDirName: GSLAM_sc
-  debug: true
-  output: true
-  pyPub: true
+  consoleDebug: true
+  logging: true
+  realtimeVis: true
 
   polyMatchThreshStart: 2.0     # Tight polygon match threshold
   polyMatchThreshStep: 0.5

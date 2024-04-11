@@ -54,6 +54,16 @@ void Observation::recomputeEdgeLengthsAndDescriptors() {
     }
 }
 
+PtLoc Observation::tfLdmk(Eigen::Index colNum, const Eigen::Matrix3d& tf) {
+    // Obtain the position of this tree in the global frame
+    Eigen::Matrix3d localPointTf {
+        {1, 0, landmarks(0, colNum)},
+        {0, 1, landmarks(1, colNum)},
+        {0, 0, 1},
+    };
+    return (tf * localPointTf)(Eigen::seq(0,1), 2);
+}
+
 
 void Observation::urquhartTesselation() {
     // Process every triangle to construct an Urquhart tessellation

@@ -322,7 +322,7 @@ struct SLAMGraph {
         return gErr;
     }
 
-    bool optimizeGraph() {
+    bool optimizeGraph(bool isDebug) {
         
         // Initialize sparse system H and coefficient vector b with zeroes
         Eigen::MatrixXd H = Eigen::MatrixXd::Zero(stateVector.size(), stateVector.size());
@@ -414,26 +414,26 @@ struct SLAMGraph {
 
         // Solve linear system
         Eigen::VectorXd dx = H.llt().solve(b);
-        // std::cout << "sv: " << stateVector.transpose() << std::endl;
-        // std::cout << "dx: " << dx.transpose() << std::endl;
         bool goodChange = true;
 
         // Validate output: make sure nothing changed too much
-        Eigen::Vector3d diffPose;
-        for (const auto& node : poseNodeList) {
-            diffPose = dx.segment(node.stateVectorIdx, 3);
-            if (std::abs(diffPose(0)) > 2 || std::abs(diffPose(1)) > 2 || std::abs(diffPose(2)) > 0.5) {
-                std::cout << "Pose node " << node.id << " changed to much, (" << diffPose.transpose() << "), cancelling optimization!!" << std::endl;
-                goodChange = false;
+        if (isDebug) {
+            Eigen::Vector3d diffPose;
+            for (const auto& node : poseNodeList) {
+                diffPose = dx.segment(node.stateVectorIdx, 3);
+                if (std::abs(diffPose(0)) > 2 || std::abs(diffPose(1)) > 2 || std::abs(diffPose(2)) > 0.5) {
+                    std::cout << "Pose node " << node.id << " changed to much, (" << diffPose.transpose() << "), cancelling optimization!!" << std::endl;
+                    goodChange = false;
+                }
             }
-        }
 
-        PtLoc diffPosition;
-        for (const auto& node : landmarkNodeList) {
-            diffPosition = dx.segment(node.stateVectorIdx, 2);
-            if (std::abs(diffPosition(0)) > 4 || std::abs(diffPosition(1)) > 4) {
-                std::cout << "Landmark node " << node.globalReprIdx << " changed to much, (" << diffPosition.transpose() << "), cancelling optimization!!" << std::endl;
-                goodChange = false;
+            PtLoc diffPosition;
+            for (const auto& node : landmarkNodeList) {
+                diffPosition = dx.segment(node.stateVectorIdx, 2);
+                if (std::abs(diffPosition(0)) > 4 || std::abs(diffPosition(1)) > 4) {
+                    std::cout << "Landmark node " << node.globalReprIdx << " changed to much, (" << diffPosition.transpose() << "), cancelling optimization!!" << std::endl;
+                    goodChange = false;
+                }
             }
         }
         // if ((dx.array().abs() > 2).any()) return false;
@@ -446,7 +446,8 @@ struct SLAMGraph {
         // Copy data from the state vector into graph nodes (for easier access)
         for (auto& node : poseNodeList) node.pose = stateVector.segment(node.stateVectorIdx, 3);
         for (auto& node : landmarkNodeList) geoHier->landmarks.col(node.globalReprIdx) = stateVector.segment(node.stateVectorIdx, 2);
-        std::cout << "New global error: " << computeGlobalError();
+        globalErrors.push_back(computeGlobalError());
+        if (isDebug) std::cout << "New global error: " << globalErrors.back();
 
         return goodChange;
     }
@@ -463,7 +464,7 @@ struct SLAMGraph {
         for (const auto& ple : plEdges) edgesOut << "P" << ple.src << " L" << ple.dst << " " << ple.distance.transpose() << std::endl;
 
         // Save global error to single file (overwriting)
-        globalErrors.push_back(computeGlobalError());
+        // globalErrors.push_back(computeGlobalError());
         // globalErrors.push_back(saveGlobalError(filePath, fileName));
         for (const auto& ge : globalErrors) errOut << ge << std::endl;
 
@@ -505,43 +506,14 @@ Eigen::Matrix3d tfFromSubsetMatches(const Points& localLandmarks, const Points& 
 }
 
 
-// Eigen::Matrix4d matchesToCloudTf(const Points& localLandmarks, const Points& globalLandmarks, const std::vector<std::pair<Eigen::Index, Eigen::Index>>& pointMatchRefs, const std::vector<int>& indices, int numMatches) {
-//     Eigen::MatrixXd A(numMatches+numMatches, 4);
-//     Eigen::VectorXd b(numMatches+numMatches);
-//     // TODO if not all matches valid, count how many of them are, then do conservativeResize at the end to crop out extra space
-
-//     // https://math.stackexchange.com/questions/77462/finding-transformation-matrix-between-two-2d-coordinate-frames-pixel-plane-to
-//     int startRow = 0;
-//     for (int i = 0; i < numMatches; ++i) {
-//         // TODO perform more elegant block assignments here
-//         Eigen::Index lIdx = pointMatchRefs.at(indices.at(i)).first, gIdx = pointMatchRefs.at(indices.at(i)).second;
-//         A.row(startRow)   = (Eigen::RowVector4d() << localLandmarks(0, lIdx), -localLandmarks(1, lIdx), 1, 0).finished();
-//         A.row(startRow+1) = (Eigen::RowVector4d() << localLandmarks(1, lIdx),  localLandmarks(0, lIdx), 0, 1).finished();
-//         b[startRow]   = globalLandmarks(0, gIdx);
-//         b[startRow+1] = globalLandmarks(1, gIdx);
-//         startRow += 2;
-//     }
-
-//     // https://www.cs.cmu.edu/~16385/s17/Slides/10.1_2D_Alignment__LLS.pdf <-- slide 24
-//     // x = (A^T A)^-1 A^T b
-//     Eigen::Vector4d x = (A.transpose() * A).inverse() * A.transpose() * b;
-
-//     // Return the 4x4 matrix to transform frames: reference --> target
-//     return Eigen::Matrix4d{
-//         {x[0], -x[1], 0, x[2]},
-//         {x[1],  x[0], 0, x[3]},
-//         {   0,     0, 1,    0},
-//         {   0,     0, 0,    1}
-//     };
-// }
-
 // euclid dist b/w points after transform (d) = 0.5
 // ratio of outliers to cause exit (r) = 0.99
 // max iterations (s) = 40000
+using GlobalPt = std::pair<Eigen::Index, PtLoc>;
 void estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
         const std::vector<std::pair<Eigen::Index, Eigen::Index>>& allMatches,
-        std::unordered_map<Eigen::Index, std::pair<Eigen::Index, PtLoc>>& acceptedMatches,
-        Eigen::Vector3d& bestTf, std::vector<std::pair<Eigen::Index, PtLoc>>& unmatchedLocals,
+        std::unordered_map<Eigen::Index, GlobalPt>& acceptedMatches,
+        Eigen::Vector3d& bestTf, std::vector<GlobalPt>& unmatchedLocals,
         int maxIter, int reqMatchesForTf, double threshForValidAssoc, double threshForAssocNetEligibility, double matchRatio)
 {
     std::random_device randomDevice;
@@ -576,35 +548,36 @@ void estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
             // Obtain the position of this tree in the global frame
             PtLoc globalPoint{(tf * localPointTf)(Eigen::seq(0,1), 2)};
 
-            // Obtain that point's squared distance to each global landmark 
+            // Find the distance to each global landmark 
             // Eigen::VectorXd sqDists = squaredDistanceToPoint(globalLandmarks, globalPoint);
             Eigen::VectorXd eucDists = euclideanDistanceToPoint(globalLandmarks, globalPoint);
+            GlobalPt gp = {lIdx, globalPoint};
 
             // Make an association with the nearest neighbor within a threshold
             if ((eucDists.array() < threshForValidAssoc).any()) {
-            // if ((sqDists.array() < threshForValidAssoc).count() > 0) {
+            // if ((sqDists.array() < threshForValidAssoc).any()) {
                 // Ensure the closest landmark has not already been matched with something
                 Eigen::Index closestLandmarkIdx;
                 eucDists.minCoeff(&closestLandmarkIdx);
 
                 // Ignore the association if the closest global point was already the source of conflict with other local points
                 if (problematicGlobals.find(closestLandmarkIdx) != problematicGlobals.end()) {
-                    unmatchedPoints.push_back({lIdx, globalPoint});
+                    unmatchedPoints.push_back(gp);
 
                 // Cancel a previous match if this local point is closest to a global point that has already been matched
                 } else if (invertedGoodMatchesSoFar.find(closestLandmarkIdx) != invertedGoodMatchesSoFar.end()) {
                     problematicGlobals.insert(closestLandmarkIdx);
-                    unmatchedPoints.push_back({lIdx, globalPoint});
+                    unmatchedPoints.push_back(gp);
                     unmatchedPoints.push_back(invertedGoodMatchesSoFar[closestLandmarkIdx]);
                     invertedGoodMatchesSoFar.erase(closestLandmarkIdx);
 
                 // Otherwise, keep this association because it is probably right
                 } else {
-                    invertedGoodMatchesSoFar[closestLandmarkIdx] = {lIdx, globalPoint};
+                    invertedGoodMatchesSoFar[closestLandmarkIdx] = gp;
                 }
 
             // Elect this point for the association network if it is too far away from everything else
-            } else if ((threshForAssocNetEligibility <= eucDists.array()).all()) unmatchedPoints.push_back({lIdx, globalPoint});
+            } else if ((threshForAssocNetEligibility <= eucDists.array()).all()) unmatchedPoints.push_back(gp);
         }
         
         // Keep this result if we have not seen anything more fitting
@@ -623,21 +596,37 @@ void estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
 }
 
 
-ros::Publisher graphPub, hierPub;
 
 
 SLAMGraph g;
 Eigen::Vector3d mostRecentGlobalPose; // if not tracking updates to all previous robot poses
-bool isDebug = false, isOutput = false, pyPub = false;
-double polyMatchThresh, polyMatchThreshStep, reqMatchedPolygonRatio, ransacValidAssocThresh, ransacAssocNetThresh, ransacMatchRatio, ptAssocThresh;
-int numSideBoundsForMatch, ransacMaxIter, ransacMatchPrereq, ransacMatchSampleSize, minAssocForNewLdmk, associationWindowSize, numOptimizations = 0;
-std::string outputPath;
 
-// Association network
+// Global variables for Association Network
 using PointRef = std::pair<int, int>;   // <frameID, cloudIdx>
 using AssocSet = std::unordered_set<PointRef, hash_pair>;
 std::unordered_map<PointRef, AssocSet, hash_pair> unresolvedLandmarks;
 std::map<int, Points> activeObsWindow;
+
+
+
+// Output options (screen, logs, realtime)
+bool isConsoleDebug = false, isLogging = false, isRealtimeVis = false;
+ros::Publisher graphPub, hierPub;
+std::string outputPath;
+
+// Parameters for keyframe-global polygon matching
+double polyMatchThresh, polyMatchThreshStep, reqMatchedPolygonRatio;
+int numSideBoundsForMatch; 
+
+// Parameters for association filtering (my "RANSAC")
+double ransacValidAssocThresh, ransacAssocNetThresh, ransacMatchRatio;
+int ransacMaxIter, ransacMatchPrereq, ransacMatchSampleSize;
+
+// Parameters for Association Network (new landmark discovery)
+double ptAssocThresh;
+int minAssocForNewLdmk, associationWindowSize;
+
+
 
 bool canFormKClique(const AssocSet& a, const AssocSet& b, const int &k) {
     // Escape early if the old point does not have enough associations to belong to a k-clique
@@ -660,7 +649,7 @@ void deleteTreeAssoc(std::unordered_map<PointRef, AssocSet, hash_pair>& map, Poi
 
 
 void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
-    if (isDebug) std::cout << "Received keyframe " << cloudMsg->header.seq << std::endl;
+    if (isConsoleDebug) std::cout << "Received keyframe " << cloudMsg->header.seq << std::endl;
 
     // Take the points from the PointCloud2 message and create a geometric hierarchy from it
     pcl::PointCloud<pcl::PointXY> localCloud;
@@ -669,10 +658,10 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     int idx = 0;
     for (const auto& p : localCloud) vectorOfTrees.col(idx++) = PtLoc{p.x, p.y};
     urquhart::Observation localObs(vectorOfTrees);
-    
+
     // Save local observation data (if desired)
-    if (isDebug) std::cout << "Defined local observation for keyframe " << cloudMsg->header.seq << " with " << vectorOfTrees.cols() << " observed trees." << std::endl;
-    if (isOutput) {
+    if (isConsoleDebug) std::cout << "Defined local observation for keyframe " << cloudMsg->header.seq << " with " << vectorOfTrees.cols() << " observed trees." << std::endl;
+    if (isLogging) {
         writeHierarchyFiles(localObs, outputPath+"/local", std::to_string(g.poseNodeList.size()+1)+".txt");
         std::ofstream ptsOut(outputPath+"/local/pts/"+std::to_string(g.poseNodeList.size()+1)+".txt");
         for (const auto& c : localObs.landmarks.colwise()) ptsOut << c(0) << " " << c(1) << std::endl;
@@ -691,39 +680,42 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         Eigen::Vector3d startPose{0,0,0};
         g.addPoseNode(startPose);
 
-        // Add initial landmarks and constrain them to the first pose node
+        // Add landmarks and constrain them to the initial pose node
         for (int lIdx = 0; lIdx < localObs.landmarks.cols(); ++lIdx) {
             PtLoc position(localObs.landmarks.col(lIdx));
             g.addLandmarkNode(lIdx, position);
             g.addPLEdge(lIdx, position);
         }
 
-        if (isDebug) {
+        if (isConsoleDebug) {
             std::cout << "Constructed initial global geometric hierarchy " << cloudMsg->header.seq << std::endl;
             std::cout << "Number of initial trees: " << localObs.landmarks.cols() << std::endl;
         }
 
         // Publish initial graph state for visualization
-        std::stringstream graphStream;
-        
-        // Initial Pose
-        graphStream << g.poseNodeList[0].pose(0) << " " << g.poseNodeList[0].pose(1) << " " << g.poseNodeList[0].pose(2);
+        if (isRealtimeVis) {
+            std::stringstream graphStream;
+            
+            // Initial Pose
+            graphStream << g.poseNodeList[0].pose(0) << " " << g.poseNodeList[0].pose(1) << " " << g.poseNodeList[0].pose(2);
 
-        graphStream << "|";
-        int tmpIdx = 0;     // Landmark Positions
-        for (const PtLoc& ldmk : g.geoHier->landmarks.colwise()) graphStream << (tmpIdx++!=0 ? ":": "") << ldmk(0) << " " << ldmk(1);
+            graphStream << "|";
+            int tmpIdx = 0;     // Landmark Positions
+            for (const PtLoc& ldmk : g.geoHier->landmarks.colwise()) graphStream << (tmpIdx++!=0 ? ":": "") << ldmk(0) << " " << ldmk(1);
 
-        // No existing landmarks
-        graphStream << "||";
-        // References to landmarks newly seen in this frame
-        for (int idx = 0; idx < g.geoHier->landmarks.cols(); ++idx) graphStream << (idx!=0 ? " ": "") << idx;
+            // No existing landmarks
+            graphStream << "||";
+            // References to landmarks newly seen in this frame
+            for (int idx = 0; idx < g.geoHier->landmarks.cols(); ++idx) graphStream << (idx!=0 ? " ": "") << idx;
 
-        graphStream << "|-1"; // Previous error (N/A)
+            graphStream << "|-1"; // Previous error (N/A)
 
-        // Construct graph message and publish
-        std_msgs::String graphMsg;
-        graphMsg.data = graphStream.str();
-        graphPub.publish(graphMsg);
+            // Construct graph message and publish
+            std_msgs::String graphMsg;
+            graphMsg.data = graphStream.str();
+            graphPub.publish(graphMsg);
+        }
+        g.globalErrors.push_back(g.computeGlobalError());
 
         // Do nothing else because we need to get more observations before optimizing
 
@@ -749,13 +741,13 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Exit early if we couldn't find matches within a reasonable amount of time
         if (matchingPointIndices.size() < ransacMatchPrereq) {
-            std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because no matches could be found." << std::endl;
+            if (isConsoleDebug) std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because no matches could be found." << std::endl;
             return;
         }
 
         // LOG MATCHES
-        if (isDebug) std::cout << "Matched " << matchingPointIndices.size() << " points with the global frame using threshold=" << matchingThresh - polyMatchThreshStep << std::endl;
-        if (isOutput) {
+        if (isConsoleDebug) std::cout << "Matched " << matchingPointIndices.size() << " points with the global frame using threshold=" << matchingThresh - polyMatchThreshStep << std::endl;
+        if (isLogging) {
             std::ofstream matOut(outputPath+"/match/"+std::to_string(g.poseNodeList.size())+".txt");
             for (const auto& [lIdx, gIdx] : matchingPointIndices) {
                 matOut << localObs.ldmkX(lIdx) << "," << localObs.ldmkY(lIdx) << "|";
@@ -771,9 +763,9 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // %%%%%%%%%%%%%%%%%%%%
 
         // Filter associations while preparing data for GraphSLAM
-        std::unordered_map<Eigen::Index, std::pair<Eigen::Index, PtLoc>> goodAssociationMap;
+        std::unordered_map<Eigen::Index, GlobalPt> goodAssociationMap;
         Eigen::Vector3d bestGlobalRobotPose;
-        std::vector<std::pair<Eigen::Index, PtLoc>> unmatchedGlobalPoints;
+        std::vector<GlobalPt> unmatchedGlobalPoints;
         estimateBestTf(localObs.landmarks, 
                         g.geoHier->landmarks, 
                         matchingPointIndices, 
@@ -787,7 +779,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                         ransacMatchRatio);
 
         // LOG FINAL ASSOCIATIONS
-        if (isOutput) { // TODO save the final associations and new landmarks so the visualization can color them differently
+        if (isLogging) { // TODO save the final associations and new landmarks so the visualization can color them differently
             std::ofstream ascOut(outputPath+"/finalAssoc/"+std::to_string(g.poseNodeList.size())+"m.txt");
             for (const auto& [gIdx, localInGlobal] : goodAssociationMap) {
                 ascOut << localObs.ldmkX(localInGlobal.first) << "," << localObs.ldmkY(localInGlobal.first) << "|";
@@ -800,11 +792,11 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             }
             uasOut.close();
         }
-        if (isDebug) {
+        if (isConsoleDebug) {
             std::cout << "Final association count is " << goodAssociationMap.size() << ", and " << unmatchedGlobalPoints.size() << " point(s) will be added to the association network." << std::endl;
             std::cout << "Estimated best global robot pose: " << bestGlobalRobotPose.transpose() << std::endl;
-            // std::cout << "Final estimated tf:\n" << v2t(bestGlobalRobotPose) << std::endl;
         }
+
 
         // %%%%%%%%%%%%%%%%%%%%%
         // Association Filtering
@@ -817,15 +809,14 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         std::vector<std::pair<PtLoc, AssocSet>> newlyEstablishedLandmarkObservations;
 
 
-        // NOTE: "numOptimizations" is the current "frameID" --> corresponds to pose nodes so that we can include the earlier observations of the tree in the graph
         // NOTE: "unresolvedLandmarks" is the association network (map from "frameID" -> Points)
         for (const auto& [lIdx, globalPoint] : unmatchedGlobalPoints) {
             // Add global and local positions to the association network reference list
             keyframePoints.col(ldmkRefIdx) = globalPoint;
             keyframePoints.col(numUnmatchedLdmks+ldmkRefIdx) = localObs.landmarks.col(lIdx);
 
-            // std::cout << "Processing PF: {"<< numOptimizations << "," << ldmkRefIdx <<"}" << std::endl;
-            PointRef pf = {numOptimizations, ldmkRefIdx++}; // {"frameID", ldmkIdx}
+            // std::cout << "Processing PF: {"<< g.poseNodeList.size() << "," << ldmkRefIdx <<"}" << std::endl;
+            PointRef pf = {g.poseNodeList.size(), ldmkRefIdx++}; // {"frameID", ldmkIdx}
             AssocSet newAssociations;
             
             // std::cout << "Current keyframePoints:\n" << keyframePoints << std::endl;
@@ -874,15 +865,16 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                 // Average out the position of the landmark
                 for (const PointRef& essentialTree : maxSubset) {
                     deleteTreeAssoc(unresolvedLandmarks, essentialTree);
-                    establishedLdmk += (essentialTree.first == numOptimizations ? keyframePoints : activeObsWindow[essentialTree.first]).col(essentialTree.second);
+                    establishedLdmk += (essentialTree.first == g.poseNodeList.size() ? keyframePoints : activeObsWindow[essentialTree.first]).col(essentialTree.second);
                 } 
                 newlyEstablishedLandmarkObservations.push_back({establishedLdmk / maxSubset.size(), maxSubset});
-                if (isDebug) std::cout << "NEW LANDMARK ESTABLISHED AT " << (establishedLdmk / maxSubset.size()).transpose() << std::endl;
+                if (isConsoleDebug) std::cout << "NEW LANDMARK ESTABLISHED AT " << (establishedLdmk / maxSubset.size()).transpose() << std::endl;
             }
         }
 
         // Store the positions of this keyframe's unassociated points
-        activeObsWindow[numOptimizations] = keyframePoints;
+        activeObsWindow[g.poseNodeList.size()] = keyframePoints;
+
 
 
         // %%%%%%%%%%%%%%%%
@@ -900,7 +892,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             existingLdmkIds.push_back(gIdx);
         }
 
-        // Add new landmark nodes (if any) and add constraints to their original observations
+        // Add new landmark nodes (if any) and constraint them to the poses where they were observed original observations
         for (const auto& [globalPoint, as] : newlyEstablishedLandmarkObservations) {
             // Define the new landmark
             int newId = g.addLandmarkNode(globalPoint);
@@ -911,51 +903,46 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                 int pointSetSize = activeObsWindow[poseNodeIdx].cols() >> 1;
                 g.addPLEdge(poseNodeIdx, newId, activeObsWindow[poseNodeIdx].col(pointSetSize + ldmkRefIdx));
             }
-
-            // Only create a landmark constraint from this observation
-            // for (const auto& [poseNodeIdx, ldmkRefIdx] : as) {
-            //     if (poseNodeIdx == numOptimizations)
-            //         g.addPLEdge(poseNodeIdx, newId, activeObsWindow[poseNodeIdx].col(numUnmatchedLdmks + ldmkRefIdx));
-            // }
         }
 
-        // Publish graph state before optimization
-        std::stringstream graphStream;
-        
-        int tmpIdx = 0; // Poses
-        for (const auto& pn : g.poseNodeList) graphStream << (tmpIdx++!=0 ? ":": "") << pn.pose(0) << " " << pn.pose(1) << " " << pn.pose(2);
+        if (isRealtimeVis) {
+            // Publish graph state before optimization
+            std::stringstream graphStream;
 
-        graphStream << "|";
-        tmpIdx = 0;     // Landmark Positions
-        for (const PtLoc& ldmk : g.geoHier->landmarks.colwise()) graphStream << (tmpIdx++!=0 ? ":": "") << ldmk(0) << " " << ldmk(1);
+            int tmpIdx = 0; // Poses
+            for (const auto& pn : g.poseNodeList) graphStream << (tmpIdx++!=0 ? ":": "") << pn.pose(0) << " " << pn.pose(1) << " " << pn.pose(2);
 
-        graphStream << "|";
-        tmpIdx = 0;     // References to existing landmarks seen in this frame
-        for (const int& id : existingLdmkIds) graphStream << (tmpIdx++!=0 ? " ": "") << id;
+            graphStream << "|";
+            tmpIdx = 0;     // Landmark Positions
+            for (const PtLoc& ldmk : g.geoHier->landmarks.colwise()) graphStream << (tmpIdx++!=0 ? ":": "") << ldmk(0) << " " << ldmk(1);
 
-        graphStream << "|";
-        tmpIdx = 0;     // References to landmarks newly seen in this frame
-        for (const int& id : newLdmkIds) graphStream << (tmpIdx++!=0 ? " ": "") << id;
 
-        graphStream << "|" << g.globalErrors.back(); // Previous error
+            graphStream << "|";
+            tmpIdx = 0;     // References to existing landmarks seen in this frame
+            for (const int& id : existingLdmkIds) graphStream << (tmpIdx++!=0 ? " ": "") << id;
 
-        // Construct graph message and publish
-        std_msgs::String graphMsg;
-        graphMsg.data = graphStream.str();
-        graphPub.publish(graphMsg);
+            graphStream << "|";
+            tmpIdx = 0;     // References to landmarks newly seen in this frame
+            for (const int& id : newLdmkIds) graphStream << (tmpIdx++!=0 ? " ": "") << id;
 
+            graphStream << "|" << g.globalErrors.back(); // Previous error
+
+            // Construct graph message and publish
+            std_msgs::String graphMsg;
+            graphMsg.data = graphStream.str();
+            graphPub.publish(graphMsg);
+        }
 
         // Optimize the graph once
-        if (isDebug) std::cout << "Optimizing graph... ";
-        bool isGood = g.optimizeGraph();
+        if (isConsoleDebug) std::cout << "Optimizing graph... ";
+        bool isGood = g.optimizeGraph(isConsoleDebug);  // TODO what if I optimized twice?
         if (!isGood) abort();
-        if (isDebug) std::cout << "   Done!" << std::endl;
+        if (isConsoleDebug) std::cout << "   Done!" << std::endl;
 
-        if (isDebug) std::cout << "Now, we think the robot's pose is " << g.poseNodeList.back().pose.transpose() << std::endl;
-
+        if (isConsoleDebug) std::cout << "Now, we think the robot's pose is " << g.poseNodeList.back().pose.transpose() << std::endl;
 
         // TODO add verbose debug option
-        // if (isDebug) std::cout << "Optimized tree positions:\n" << g.geoHier->landmarks.transpose() << std::endl;
+        // if (isConsoleDebug) std::cout << "Optimized tree positions:\n" << g.geoHier->landmarks.transpose() << std::endl;
 
 
         // %%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -964,10 +951,10 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Overwrite or amend the geometric hierarchy depending on whether new landarks were found
         if (unmatchedGlobalPoints.size() > 0) {
-            if (isDebug) std::cout << "Recomputing hierarchy." << std::endl;
+            if (isConsoleDebug) std::cout << "Recomputing hierarchy." << std::endl;
             g.geoHier->computeHierarchy();
         } else {
-            if (isDebug) std::cout << "Recomputing edge lengths." << std::endl;
+            if (isConsoleDebug) std::cout << "Recomputing edge lengths." << std::endl;
             g.geoHier->recomputeEdgeLengthsAndDescriptors();
         }
 
@@ -1010,22 +997,16 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
     }
 
-    // Increment to indicate the graph has been updated once
-    // Also corresponds to the number of pose nodes in the graph 
-    ++numOptimizations;
-    if (isDebug) std::cout << "-------------------------------------------------------------------" << std::endl;
+    if (isConsoleDebug) std::cout << "-------------------------------------------------------------------" << std::endl;
 
-    // Print the graph to a file (for debugging)
-    if (isOutput) {
-        // if (isDebug) std::cout << "Logging global data... ";
+    // Save global map state to files (for debugging)
+    if (isLogging) {
         writeHierarchyFiles(*g.geoHier, outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
-        // if (isDebug) std::cout << "   Done!" << std::endl;
-        // if (isDebug) std::cout << "Saving graph data... ";
         g.writeGraphToFiles(outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
-        // if (isDebug) std::cout << "   Done!" << std::endl;
     }
 
-    if (pyPub) {
+    // Serialize geometric hierarchy for real-time visualization
+    if (isRealtimeVis) {
         std::stringstream polyStream, triStream, ptStream, hierStream;
         hierStream << g.poseNodeList.size() << "!";
         
@@ -1066,6 +1047,10 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 // TODO consolidate logging to single directory for all nodes in pipeline
 // Validate matches in global are within twice the observation radius of the robot
 
+// TODO Store rejected keyframes for a little bit
+// Try matching them together to build additional maps
+// occasionally try merging with main graph
+
 
 int main(int argc, char **argv) {
     // Initialize Node and read in private parameters
@@ -1075,9 +1060,9 @@ int main(int argc, char **argv) {
     // I/O parameters
     std::string absolutePackagePath = ros::package::getPath("urquhart");
     n.param<std::string>("outputDirName", outputPath, "gTEST");
-    isDebug = n.param("debug", true);
-    isOutput = n.param("output", true);
-    pyPub = n.param("pyPub", false);
+    isConsoleDebug = n.param("consoleDebug", true);
+    isLogging = n.param("logging", true);
+    isRealtimeVis = n.param("realtimeVis", false);
 
     // Hierarchy matching parameters
     polyMatchThresh = n.param("polyMatchThreshStart", 5.0);
@@ -1099,7 +1084,7 @@ int main(int argc, char **argv) {
     ptAssocThresh = n.param("ptAssocThresh", 1.0);                      // meters (distance for association in network)
 
 
-    if (isOutput) {
+    if (isLogging) {
         std::cout << "Creating output directory: '" << outputPath << "' ... ";
         outputPath = absolutePackagePath+"/output/"+outputPath;
         std::filesystem::remove_all(outputPath);

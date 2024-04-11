@@ -27,10 +27,10 @@ keyframe_maker:
   clusterTolerance: 0.3
 
 graph_builder:
-  outputDirName: graph_bad_assoc
-  debug: true
-  output: true
-  pyPub: false
+  outputDirName: keyframe_crash
+  consoleDebug: true
+  logging: true
+  realtimeVis: false
 
   polyMatchThreshStart: 2.0     # Tight polygon match threshold
   polyMatchThreshStep: 0.5

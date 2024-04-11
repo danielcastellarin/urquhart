@@ -24,13 +24,13 @@ keyframe_maker:
   numSkippedFramesBeforeSend: 3
   polygonMatchThresh: 3
   validPointMatchThresh: 0.75
-  clusterTolerance: 0.3
+  clusterTolerance: 0.4
 
 graph_builder:
   outputDirName: circle_edgemap
-  debug: true
-  output: true
-  pyPub: false
+  consoleDebug: false
+  logging: false
+  realtimeVis: false
 
   polyMatchThreshStart: 2.0     # Tight polygon match threshold
   polyMatchThreshStep: 0.5

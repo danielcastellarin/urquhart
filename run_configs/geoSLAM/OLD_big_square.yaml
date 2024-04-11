@@ -25,8 +25,8 @@ keyframe_maker:
 
 graph_builder:
   outputDirName: GSLAM_ss
-  debug: false
-  output: false
-  pyPub: true
+  consoleDebug: false
+  logging: false
+  realtimeVis: true
   polyMatchThreshStart: 0.5
   polyMatchThreshStep: 0.25

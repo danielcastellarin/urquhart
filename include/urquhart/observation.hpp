@@ -51,6 +51,8 @@ namespace urquhart {
             const double& ldmkY(Eigen::Index colNum) const;
             const Points& ldmks(Eigen::VectorXi indices) const;
 
+            PtLoc tfLdmk(Eigen::Index colNum, const Eigen::Matrix3d& tf);
+
         private:
             // Computes a Delaunay triangulation using QHull from a set of landmarks.
             void delaunayTriangulationFromScratch(std::vector<Polygon>& polygons);
