@@ -154,10 +154,10 @@ int main(int argc, char **argv)
     ros::Publisher gPosePub = n.advertise<geometry_msgs::Pose2D>("global_pose", 1);
 
     // Create a directory to store the simulation data
-    std::filesystem::remove_all(cfg.outputDirPath);
-    std::filesystem::create_directories(cfg.globalPointsPath);
-    std::filesystem::create_directory(cfg.localPointsPath);
-    std::cout << "Created output directory: " << cfg.outputDirName << "\n";
+    // std::filesystem::remove_all(cfg.outputDirPath);
+    // std::filesystem::create_directories(cfg.globalPointsPath);
+    // std::filesystem::create_directory(cfg.localPointsPath);
+    // std::cout << "Created output directory: " << cfg.outputDirName << "\n";
     
 
     // Find a starting location and observe the environment
@@ -183,10 +183,13 @@ int main(int argc, char **argv)
 
 
             // Save data to files
-            writeObservationToFile(cfg.globalPointsPath+std::to_string(nextObs.id), nextObs.globalTreePositions);
-            writeObservationToFile(cfg.localPointsPath+std::to_string(nextObs.id), nextObs.localTreePositions);
-            std::ofstream gposeOut(cfg.outputDirPath+"/!gp.txt", std::ios_base::app);
-            gposeOut << nextObs.globalPose.printPose() << " " << nextObs.globalPose.linearV << " " << nextObs.globalPose.angularV << std::endl;
+            if (cfg.isLogging) {
+                writeObservationToFile(cfg.globalPointsPath+std::to_string(nextObs.id), nextObs.globalTreePositions);
+                writeObservationToFile(cfg.localPointsPath+std::to_string(nextObs.id), nextObs.localTreePositions);
+                std::ofstream gposeOut(cfg.outputDirPath+"/!gp.txt", std::ios_base::app);
+                gposeOut << nextObs.globalPose.printPose() << " " << nextObs.globalPose.linearV << " " << nextObs.globalPose.angularV << std::endl;
+                gposeOut.close();
+            }
 
             // Prepare for next iteration
             isFinished = nextObs.isLast;
@@ -195,10 +198,12 @@ int main(int argc, char **argv)
         }
 
         // Also save this run's configuration
-        std::ofstream configOut(cfg.outputDirPath+"/!config.txt");
-        cfg.outputConfig(configOut);
-        configOut << "Total observations: " << numFrames << std::endl;
-        configOut.close();
+        if (cfg.isLogging) {
+            std::ofstream configOut(cfg.outputDirPath+"/!config.txt");
+            cfg.outputConfig(configOut);
+            configOut << "Total observations: " << numFrames << std::endl;
+            configOut.close();
+        }
 
     } else {
         std::cout << "Could not find a valid starting position (random initialization attempts exceeded limit)." << std::endl;    

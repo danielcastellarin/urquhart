@@ -10,6 +10,7 @@ import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import ConnectionPatch
+import math
 
 def keypress(event):
     global frameID, toggleAllMatches
@@ -30,6 +31,13 @@ def keypress(event):
             toggleAllMatches = not toggleAllMatches
             draw_vis()
 
+def getRot(dirname, frameID):
+    poseNodes = {}
+    for line in open(f'{dirname}/global/graph_nodes/{frameID}.txt'):
+        vals = line.split(' ')
+        if vals[0][0] == 'P': poseNodes[int(vals[0][1:])+1] = tuple(map(float, [n for n in vals[1:] if n != ""]))
+    return poseNodes[frameID][2]
+    
 
 def get_global_obs(dirname, frameID):
     polygons = []
@@ -56,13 +64,20 @@ def get_local_obs(dirname, frameID):
     return polygons, triangles, trees
 
 
-def display_triangulation(plt_axis, dirname, frameID, getObsFunc, headTitle):
+def display_triangulation(plt_axis, dirname, frameID, getObsFunc, headTitle, s, c):
     _, triangles, trees = getObsFunc(dirname, frameID)
     plt_axis.set_title(f"{headTitle} Triangulation - {frameID}")
+    sv,cv = np.empty(3), np.empty(3)
+    sv.fill(s), cv.fill(c)
     for i,x,y in triangles:
-        plt_axis.fill(x, y, facecolor='none', edgecolor='black', linewidth=2)
+        plt_axis.fill(np.array(x)*c - np.array(y)*s, np.array(x)*s + np.array(y)*c, facecolor='none', edgecolor='black', linewidth=2)
+        # plt_axis.fill(x*c-y*s, x*s+y*c, facecolor='none', edgecolor='black', linewidth=2)
+        # plt_axis.fill(x.dot(c)-y.dot(s), x.dot(s)+y.dot(c), facecolor='none', edgecolor='black', linewidth=2)
+        # plt_axis.fill(x, y, facecolor='none', edgecolor='black', linewidth=2)
         # plt_axis.text(sum(x)/3, sum(y)/3, int(i[0]))
-    for x, y in trees: plt_axis.plot(x, y, 'ro')
+    
+    
+    for x, y in trees: plt_axis.plot(x*c-y*s, x*s+y*c, 'ro')
 
 
 def display_polygons(plt_axis, dirname, frameID, getObsFunc, headTitle):
@@ -74,9 +89,12 @@ def display_polygons(plt_axis, dirname, frameID, getObsFunc, headTitle):
 
 def draw_vis():
     np.random.seed(10)
+    rads = getRot(directory, frameID)
+    s,c = math.sin(rads), math.cos(rads)
+
     # First row
-    display_triangulation(ax[0][0], directory, frameID+1, get_local_obs, "Local")
-    display_triangulation(ax[0][1], directory, frameID, get_global_obs, "Global")
+    display_triangulation(ax[0][0], directory, frameID+1, get_local_obs, "Local", s, c)
+    display_triangulation(ax[0][1], directory, frameID, get_global_obs, "Global", 0, 1)
 
     # Second row
     display_polygons(ax[1][0], directory, frameID+1, get_local_obs, "Local")
@@ -85,19 +103,25 @@ def draw_vis():
     if toggleAllMatches:
         for line in open(f'{directory}/match/{frameID}.txt'):
             if line == '': continue
-            p1, p2 = [tuple(map(float, c.split(','))) for c in line.split('|')]
+            # p1, p2 = [tuple(map(float, c.split(','))) for c in line.split('|')]
+            (p1x, p1y), (p2x, p2y) = [tuple(map(float, c.split(','))) for c in line.split('|')]
+            p1, p2 = (p1x*c-p1y*s, p1x*s+p1y*c), (p2x, p2y)
             ax[0][1].add_artist(ConnectionPatch(xyA=p1, xyB=p2, coordsA="data", coordsB="data", axesA=ax[0][0], axesB=ax[0][1], color="blue"))
     else:
         for line in open(f'{directory}/finalAssoc/{frameID}m.txt'):
             if line == '': continue
-            p1, p2 = [tuple(map(float, c.split(','))) for c in line.split('|')]
+            # p1, p2 = [tuple(map(float, c.split(','))) for c in line.split('|')]
+            (p1x, p1y), (p2x, p2y) = [tuple(map(float, c.split(','))) for c in line.split('|')]
+            p1, p2 = (p1x*c-p1y*s, p1x*s+p1y*c), (p2x, p2y)
             ax[0][1].add_artist(ConnectionPatch(xyA=p1, xyB=p2, coordsA="data", coordsB="data", axesA=ax[0][0], axesB=ax[0][1], color="g"))
             ax[0][1].plot(p2[0], p2[1], color="g", marker="o")
             ax[0][0].plot(p1[0], p1[1], color="g", marker="o")
         
         for line in open(f'{directory}/finalAssoc/{frameID}u.txt'):
             if line == '': continue
-            p1, p2 = [tuple(map(float, c.split(','))) for c in line.split('|')]
+            # p1, p2 = [tuple(map(float, c.split(','))) for c in line.split('|')]
+            (p1x, p1y), (p2x, p2y) = [tuple(map(float, c.split(','))) for c in line.split('|')]
+            p1, p2 = (p1x*c-p1y*s, p1x*s+p1y*c), (p2x, p2y)
             ax[0][1].add_artist(ConnectionPatch(xyA=p1, xyB=p2, coordsA="data", coordsB="data", axesA=ax[0][0], axesB=ax[0][1], color="purple"))
             ax[0][1].plot(p2[0], p2[1], color="purple", marker="o")
             ax[0][0].plot(p1[0], p1[1], color="purple", marker="o")

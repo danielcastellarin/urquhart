@@ -17,9 +17,22 @@ std::vector<std::pair<Eigen::Index, Eigen::Index>> hierarchyIndexMatching(const 
         polygonMatching(ref, ref.hier->getChildrenIds(refPoly), targ, targ.hier->getChildrenIds(targPoly), thresh, triangleMatches);
     }
 
-    // std::vector<std::pair<Eigen::Index, Eigen::Index>> pairs = pointIndexMatching(ref, targ, triangleMatches);
-    // std::cout << pairs.size() << " pairs acquired" << std::endl;
-    // return pairs;
+    // Vertex Matching (Level 0)
+    return pointIndexMatching(ref, targ, triangleMatches);
+}
+
+std::vector<std::pair<Eigen::Index, Eigen::Index>> nonGreedyHierarchyIndexMatching(const urquhart::Observation &ref,
+                                                        const urquhart::Observation &targ, double thresh, int numSideBoundsForMatch, double reqMatchedPolygonRatio)
+{
+    std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;    
+
+    // Polygon Matching (Level 2)
+    nonGreedyPolygonMatching(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), thresh, numSideBoundsForMatch, 0, polygonMatches);
+
+    // Triangle Matching (Level 1)
+    for (const auto& [refPoly, targPoly] : polygonMatches) {
+        nonGreedyPolygonMatching(ref, ref.hier->getChildrenIds(refPoly), targ, targ.hier->getChildrenIds(targPoly), thresh, numSideBoundsForMatch, reqMatchedPolygonRatio, triangleMatches);
+    }
 
     // Vertex Matching (Level 0)
     return pointIndexMatching(ref, targ, triangleMatches);
@@ -59,6 +72,100 @@ void polygonMatching(
         }
     }
 }
+
+
+void nonGreedyPolygonMatching(
+        const urquhart::Observation &ref, std::unordered_set<int> refIds,
+        const urquhart::Observation &targ, std::unordered_set<int> targIds,
+        double thresh, int numSideBoundsForMatch, double reqMatchedPolygonRatio,
+        std::vector<std::pair<size_t, size_t>> &polygonMatches)
+{
+    double distancePlaceholder;
+    int numExistingMatches = polygonMatches.size();
+
+    std::unordered_map<size_t, std::pair<double, size_t>> targetsClosestDist;
+    std::unordered_map<size_t, std::map<double, size_t>> refClosestTargets;
+
+    // For each reference Polygon, find its distance to each Polygon in the target set
+    for (const auto& rIdx : refIds) {
+        urquhart::Polygon rp = ref.hier->getPolygon(rIdx);
+
+        for (const auto& tIdx : targIds) {
+            urquhart::Polygon tp = targ.hier->getPolygon(tIdx);
+
+            // Record match if target is the closest polygon under the threshold
+            distancePlaceholder = std::abs(rp.n - tp.n) <= numSideBoundsForMatch ? descriptorDistance(rp.descriptor, tp.descriptor) : 1000000;
+
+            if (distancePlaceholder < thresh) {
+                refClosestTargets[rIdx].insert({distancePlaceholder, tIdx});
+                if (targetsClosestDist.find(tIdx) == targetsClosestDist.end() || distancePlaceholder < targetsClosestDist[tIdx].first)
+                    targetsClosestDist[tIdx] = {distancePlaceholder, rIdx};
+            }
+        }
+    }
+
+    // Add all pairs from the target polygon's perspective
+    for (const auto& [tIdx, closestRef] : targetsClosestDist)
+        polygonMatches.push_back({closestRef.second, tIdx});
+
+    // For any pair that the reference disagrees with, add the next closest match (if possible)
+    // for (const auto& [rIdx, closebyTargets] : refClosestTargets) {
+    //     for (auto targIter = closebyTargets.begin(); targIter != closebyTargets.end() && )
+    //     if (targIter->second)
+    // }
+    // ^^^^^ unnecessary
+
+    // Invalidate these matches if not enough of them were made
+    if (polygonMatches.size() - numExistingMatches < reqMatchedPolygonRatio * refIds.size()) polygonMatches.resize(numExistingMatches);
+}
+
+
+// void nonGreedyPolygonMatching(
+//         const urquhart::Observation &ref, std::unordered_set<int> refIds,
+//         const urquhart::Observation &targ, std::unordered_set<int> targIds,
+//         double thresh, int numSideBoundsForMatch, double reqMatchedPolygonRatio,
+//         std::vector<std::pair<size_t, size_t>> &polygonMatches)
+// {
+
+//     // Rows link to reference polygons, columns link to 
+//     Eigen::MatrixXd descDistances(refIds.size(), targIds.size());
+
+//     // NOTE: current hierarchy implementation does not have predictable polygon indexing, therefore indices must be mapped
+//     std::unordered_map<int, int> refPolyIDMap(refIds.size()), targPolyIDMap(targIds.size()),
+//                                 iiRefPolyIDMap(refIds.size()), iiTargPolyIDMap(targIds.size());
+
+//     // Assign target polygons columns in the matrix
+//     for (const auto& tIdx : targIds) {
+//         iiTargPolyIDMap[targPolyIDMap.size()] = tIdx;
+//         targPolyIDMap[tIdx] = targPolyIDMap.size();
+//     }
+
+//     // Find the distance between the descriptors of each pair of polygons
+//     for (const auto& rIdx : refIds) {
+//         urquhart::Polygon rp = ref.hier->getPolygon(rIdx);
+//         iiRefPolyIDMap[refPolyIDMap.size()] = rIdx;
+//         refPolyIDMap[rIdx] = refPolyIDMap.size();
+
+//         for (const auto& tIdx : targIds) {
+//             urquhart::Polygon tp = targ.hier->getPolygon(tIdx);
+
+//             // Only attempt a match if the number of vertices each polygon has is within a certain amount
+//             descDistances(refPolyIDMap[rIdx], targPolyIDMap[tIdx]) = std::abs(rp.n - tp.n) <= numSideBoundsForMatch ? descriptorDistance(rp.descriptor, tp.descriptor) : 10000;
+//         }
+//     }
+
+//     // Get get distances and indices of the target polygon closest to each reference polygon
+//     Eigen::VectorXd minDistances = descDistances.rowwise().minCoeff();
+//     Eigen::ArrayXi distancesUnderThresh = minDistances.array() < thresh, minDistanceIdxs(refIds.size()); int i=0;
+//     for (const auto& row : descDistances.rowwise()) row.minCoeff(&minDistanceIdxs(i++));
+
+//     // As long as enough polygons are similar enough, return those valid matches
+//     if (distancesUnderThresh.count() > reqMatchedPolygonRatio * refIds.size()) {
+//         for (i = 0; i < distancesUnderThresh.size(); ++i) {
+//             if (distancesUnderThresh(i)) polygonMatches.push_back({iiRefPolyIDMap[i], iiTargPolyIDMap[minDistanceIdxs[i]]});
+//         }
+//     }
+// }
 
 
 std::vector<std::pair<Eigen::Index, Eigen::Index>> pointIndexMatching(const urquhart::Observation &ref, const urquhart::Observation &targ, const std::vector<std::pair<size_t, size_t>> &triangleMatches)

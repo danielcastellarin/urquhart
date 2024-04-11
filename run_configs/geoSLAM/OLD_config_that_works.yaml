@@ -1,0 +1,43 @@
+outputDirName: GSLAM_sc
+logging: true
+
+sim_path:
+  forestFile: coolForest.txt    # local from 'urquhart' package
+  pathType: circle
+  distanceToTravel: 200
+  distanceBetweenObservations: 0.2
+  observationRange: 40
+  collisionRadius: 0.3
+  successfulObservationProbability: 0.95
+  treePositionStandardDeviation: 0.1
+  # landmarkAssociationThreshold: 0.8
+  # treeAssociationThreshold: 0.5
+  pubRate: 0.5
+  randomSeed: 17
+  debug: false
+
+keyframe_maker:
+  debug: false
+  indivFramePub: false
+  maxKeyframeWidth: 5
+  numSkippedFramesBeforeSend: 3
+  polygonMatchThresh: 3
+  validPointMatchThresh: 0.75
+  clusterTolerance: 0.3
+
+graph_builder:
+  consoleDebug: true
+  realtimeVis: true
+
+  polyMatchThreshStart: 2.0
+  polyMatchThreshStep: 0.5
+  numSideBoundsForMatch: 3
+  reqMatchedPolygonRatio: 0.5
+  
+  ransacMaxIter: 50
+  ransacMatchPrereq: 6
+  ransacValidAssocThresh: 0.5
+  ransacMatchRatio: 1
+
+  associationWindowSize: 5
+  ptAssocThresh: 1.0

@@ -23,7 +23,7 @@ namespace urquhart {
             void view();
 
             void computeHierarchy();
-            void recomputeEdgeLengths();
+            void recomputeEdgeLengthsAndDescriptors();
 
             // Storage for the positions of all landmarks in this observation (one per column)
             // All polygons store references to these values
@@ -50,6 +50,8 @@ namespace urquhart {
             const double& ldmkX(Eigen::Index colNum) const;
             const double& ldmkY(Eigen::Index colNum) const;
             const Points& ldmks(Eigen::VectorXi indices) const;
+
+            PtLoc tfLdmk(Eigen::Index colNum, const Eigen::Matrix3d& tf);
 
         private:
             // Computes a Delaunay triangulation using QHull from a set of landmarks.

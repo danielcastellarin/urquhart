@@ -30,15 +30,13 @@ from matplotlib.patches import ConnectionPatch
 #         draw_vis()
 
 
-
-
-def draw_frame(id):
+def draw_frame(id, polygons, triangles, points):
     np.random.seed(10)
     for a in ax.flatten(): a.cla()
     plt.title(f"Frame {id}")
     
-    display_triangulation(ax[0], id, allTriangles[id], allPoints[id])
-    display_polygons(ax[1], id, allPolygons[id])
+    display_triangulation(ax[0], id, triangles, points)
+    display_polygons(ax[1], id, polygons)
     
     plt.tight_layout()
     plt.draw()
@@ -56,46 +54,30 @@ def display_polygons(plt_axis, frameID, polygons):
 
 
 
-allPolygons = {}
-allTriangles = {}
-allPoints = {}
 fig, ax = plt.subplots(nrows=2, ncols=1)
 fig.set_figheight(9)
 fig.set_figwidth(4.5)
+numFrames = 0
 
 
-
-def read_polygons(data: String):
+def read_hierarchy(data: String):
+    global numFrames
     id = data.data.split("!")[0]    # get frame ID
+    polygons, triangles, points = tuple(data.data.split("!")[1].split("$"))
 
     polys = []  # Deserialize polygons
-    for poly in data.data.split("!")[1].split(":")[:-1]:
-        polys.append(zip(*[tuple(map(float, pt.split(' '))) for pt in poly.split('|')]))
-    
-    allPolygons[id] = polys # draw frame if we have all the data
-    if id in allTriangles and id in allPoints:
-        draw_frame(id)
-
-
-def read_triangles(data: String):
-    id = data.data.split("!")[0]    # get frame ID
+    for poly in polygons.split("|"):
+        polys.append(zip(*[tuple(map(float, pt.split(' '))) for pt in poly.split(':')]))
 
     tris = []   # Deserialize triangles
-    for tri in data.data.split("!")[1].split(":")[:-1]:
-        tris.append(zip(*[tuple(map(float, pt.split(' '))) for pt in tri.split('|')]))
-    
-    allTriangles[id] = tris # draw frame if we have all the data
-    if id in allPolygons and id in allPoints:
-        draw_frame(id)
+    for tri in triangles.split("|"):
+        tris.append(zip(*[tuple(map(float, pt.split(' '))) for pt in tri.split(':')]))
 
+    # Deserialize points
+    pts = [tuple(map(float, pt.split(' '))) for pt in points.split(":")]
 
-def read_points(data: String):
-    id = data.data.split("!")[0]    # get frame ID
-    pts = [tuple(map(float, pt.split(' '))) for pt in data.data.split("!")[1].split("|")]
-    
-    allPoints[id] = pts # draw frame if we have all the data
-    if id in allPolygons and id in allTriangles:
-        draw_frame(id)
+    draw_frame(id, polys, tris, pts)
+    numFrames += 1
 
 
 ################
@@ -103,11 +85,13 @@ def read_points(data: String):
 ################
 
 def listener():
-    rospy.init_node('global_display')
-    rospy.Subscriber("/graph_builder/polygons", String, read_polygons)
-    rospy.Subscriber("/graph_builder/triangles", String, read_triangles)
-    rospy.Subscriber("/graph_builder/points", String, read_points)
+    # NOTE: namespace should be set externally
+    rospy.init_node('gh_display')
+    rospy.Subscriber("hierarchy", String, read_hierarchy)
+
     # obsRange = rospy.get_param("/sim_path/observationRange", obsRange) * 1.25
+
+    fig.canvas.set_window_title(f"Geometric Hierarchy")
 
     # plt.ion()
     # plt.show(block=False)
@@ -116,7 +100,7 @@ def listener():
 
 
     plt.close()
-    print(f"Number of frames seen: {len(allPoints)}")
+    print(f"Number of frames seen: {numFrames}")
 
 if __name__ == '__main__':
     listener()

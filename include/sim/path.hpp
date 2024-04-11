@@ -21,7 +21,7 @@ struct SimConfig
     successfulObservationProbability, treePositionStandardDeviation, treeRadiusStandardDeviation,
     pubRate;
     int initializationAttempts, numObservationsForValidLandmark, randomSeed;
-    bool givenStartPose = false;
+    bool givenStartPose = false, isLogging = false;
     Pose initialPose;
     std::string outputDirName;
 
@@ -42,21 +42,23 @@ struct SimConfig
         treeAssociationThreshold = nh.param("treeAssociationThreshold", 0.5);   // should be smaller than landmark association thresh
 
         // Optional parameters
-        successfulObservationProbability = nh.param("successfulObservationProbability", 1);
-        treePositionStandardDeviation = nh.param("treePositionStandardDeviation", 0);
-        treeRadiusStandardDeviation = nh.param("treeRadiusStandardDeviation", 0);
+        successfulObservationProbability = nh.param("successfulObservationProbability", 1.0);
+        treePositionStandardDeviation = nh.param("treePositionStandardDeviation", 0.0);
+        treeRadiusStandardDeviation = nh.param("treeRadiusStandardDeviation", 0.0);
         if (nh.hasParam("startPoseX") && nh.hasParam("startPoseY") && nh.hasParam("startPoseTheta")) {
             double x, y, theta;
             nh.getParam("startPoseX", x), nh.getParam("startPoseY", y), nh.getParam("startPoseTheta", theta);
             initialPose = Pose(x, y, theta);
             givenStartPose = true;
         }
-        pubRate = nh.param("pubRate", 10); // Hz
+        pubRate = nh.param("pubRate", 10.0); // Hz
         initializationAttempts = nh.param("initializationAttempts", 10000);
         numObservationsForValidLandmark = nh.param("initializationAttempts", 5);
         randomSeed = nh.param("randomSeed", -1);
-        nh.param<std::string>("outputDirName", outputDirName, "testOutput");
 
+        // Setup logging (if necessary)
+        isLogging = nh.param("/logging", false);
+        nh.param<std::string>("/outputDirName", outputDirName, "testOutput");
         outputDirPath = absolutePackagePath+"output/"+outputDirName;
         globalPointsPath = outputDirPath+"/global_obs/";
         localPointsPath = outputDirPath+"/local_obs/";

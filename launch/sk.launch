@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <launch>
+    <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/big_square.yaml" command="load" /> -->
     <rosparam file="$(find urquhart)/run_configs/geoSLAM/config_that_works.yaml" command="load" />
     
     <!-- Simulate robot observations -->

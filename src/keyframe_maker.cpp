@@ -15,6 +15,7 @@
 #include <pcl/common/centroid.h>
 #include <pcl/segmentation/extract_clusters.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <std_msgs/String.h>
 #include <ros/ros.h>
 
 
@@ -30,39 +31,22 @@ struct ObsRecord {
 };
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr bigPcPtr(new pcl::PointCloud<pcl::PointXYZ>());
-ros::Publisher kfpub, bigCloudPub;
+ros::Publisher kfpub, bigCloudPub, hierPub;
 
 std::vector<ObsRecord> unassociatedObs;
 std::set<ObsRecord> kfObs;
-bool isDebug;
-int maxKeyframeWidth, numSkippedFramesBeforeSend;
-double polygonMatchThresh, validPointMatchThresh, clusterTolerance;
+bool isDebug, isIndivFramePub, pubAllPoints;
+int maxKeyframeWidth, numSkippedFramesBeforeSend, numSideBoundsForMatch;
+double polygonMatchThresh, reqMatchedPolygonRatio, validPointMatchThresh, clusterTolerance;
 
 
-
-void publishAllPoints(const pcl::PointCloud<pcl::PointXYZ>::Ptr& allPoints, int seqID, std::string frameName) {
-    sensor_msgs::PointCloud2 pc2_msg;
-    pcl::toROSMsg(*allPoints, pc2_msg);
+void publishPointCloud(ros::Publisher& pub, sensor_msgs::PointCloud2& pc2_msg, int seqID, std::string frameName) {
     pc2_msg.header.frame_id = frameName;
     pc2_msg.header.stamp = ros::Time::now();
     pc2_msg.header.seq = seqID;
-    bigCloudPub.publish(pc2_msg);
+    pub.publish(pc2_msg);
 }
 
-void publishKeyFrame(const pcl::PointCloud<pcl::PointXY>& kfPoints, int seqID, std::string frameName) {
-    sensor_msgs::PointCloud2 pc2_msg;
-    pcl::toROSMsg(kfPoints, pc2_msg);
-    pc2_msg.header.frame_id = frameName;
-    pc2_msg.header.stamp = ros::Time::now();
-    pc2_msg.header.seq = seqID;
-    kfpub.publish(pc2_msg);
-}
-
-pcl::PointXY pclConvert(const PtLoc& p) {
-    pcl::PointXY myPoint;
-    myPoint.x = p[0]; myPoint.y = p[1];
-    return myPoint;
-}
 pcl::PointXY pclConvert(const Eigen::Vector4d& p) {
     pcl::PointXY myPoint;
     myPoint.x = p[0]; myPoint.y = p[1];
@@ -98,20 +82,15 @@ Eigen::Matrix4d computeRigid2DEuclidTfFromIndices(const std::vector<std::pair<Ei
     return tf;
 }
 
-std::vector<std::pair<Eigen::Index, Eigen::Index>> matchObsIdx(const urquhart::Observation &ref, const urquhart::Observation &targ, double polyMatchThresh, double validPointMatchThresh) {
-
-    // Perform traditional data association 
-    std::vector<std::pair<Eigen::Index, Eigen::Index>> finalVertexMatches, vertexMatches = matching::hierarchyIndexMatching(ref, targ, polyMatchThresh);
+std::vector<std::pair<Eigen::Index, Eigen::Index>> matchObsIdx(const urquhart::Observation &ref, const urquhart::Observation &targ, double polyMatchThresh, double pointMatchThresh) {
+    // Perform traditional data association
+    // std::vector<std::pair<Eigen::Index, Eigen::Index>> finalVertexMatches, vertexMatches = matching::hierarchyIndexMatching(ref, targ, polyMatchThresh);
+    std::vector<std::pair<Eigen::Index, Eigen::Index>> finalVertexMatches, vertexMatches = matching::nonGreedyHierarchyIndexMatching(ref, targ, polyMatchThresh, numSideBoundsForMatch, reqMatchedPolygonRatio);
 
     // Post-process: double-check matches, remove any where pairs are beyond a certain distance from each other
-    // for (auto iter = vertexMatches.begin(); iter != vertexMatches.end(); ++iter) {
-    //     if (std::abs(ref.ldmkX(iter->first) - targ.ldmkX(iter->second)) > validPointMatchThresh || std::abs(ref.ldmkY(iter->first) - targ.ldmkY(iter->second)) > validPointMatchThresh)
-    //     // if (((ref.landmarks.col(iter->first) - targ.landmarks.col(iter->second)).array().abs() > validPointMatchThresh).any())
-    //         vertexMatches.erase(iter);
-    // }
-    // arrogance check: if matched points across differential observations are not very close, then the match is probably wrong
+    // "if matched points across differential observations are not very close relative to the observer, then the match is probably wrong"
     for (const auto& [refIdx, targIdx] : vertexMatches) {
-        if (((ref.landmarks.col(refIdx) - targ.landmarks.col(targIdx)).array().abs() < validPointMatchThresh).all())
+        if (((ref.landmarks.col(refIdx) - targ.landmarks.col(targIdx)).array().abs() < pointMatchThresh).all())
             finalVertexMatches.push_back({refIdx, targIdx});
     }
 
@@ -221,6 +200,42 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         if (isDebug) std::cout << "Initializing unassociated observations at frame " << myObs.frameId << std::endl;
     }
 
+    // Publish geometric hierarchy for the input frame (if desired)
+    if (isIndivFramePub) {
+        std::stringstream polyStream, triStream, ptStream, hierStream;
+        hierStream << myObs.frameId << "!";
+        
+        // Iterate over the indices of the Polygons in the hierarchy
+        int j = 0, k = 0;
+        for (auto pIdx : myObs.obs.hier->getChildrenIds(0)) {
+            polyStream << (j++!=0 ? "|": "");
+            for (int i = 0; i < myObs.obs.hier->getPolygon(pIdx).landmarkRefs.size(); ++i) {
+                auto myPoint = myObs.obs.landmarks.col(myObs.obs.hier->getPolygon(pIdx).landmarkRefs(i));
+                polyStream << (i!=0 ? ":": "") << myPoint[0] << " " << myPoint[1];
+            }
+            
+            // Iterate over the indices of the Triangles that compose this Polygon
+            for (auto tIdx : myObs.obs.hier->getChildrenIds(pIdx)) {
+                triStream << (k++!=0 ? "|": "");
+                for (int i = 0; i < myObs.obs.hier->getPolygon(tIdx).landmarkRefs.size(); ++i) {
+                    auto myPoint = myObs.obs.landmarks.col(myObs.obs.hier->getPolygon(tIdx).landmarkRefs(i));
+                    triStream << (i!=0 ? ":": "") << myPoint[0] << " " << myPoint[1];
+                }
+            }
+        }
+
+        j = 0;
+        for (const PtLoc& ldmk : myObs.obs.landmarks.colwise()) {
+            ptStream << (j++ != 0 ? ":": "") << ldmk(0) << " " << ldmk(1);
+        }
+
+        // Construct message from string streams and publish
+        std_msgs::String hierMsg;
+        hierStream << polyStream.str() << "$" << triStream.str() << "$" << ptStream.str();
+        hierMsg.data = hierStream.str();
+        hierPub.publish(hierMsg);
+    }
+
     // std::cout << "Unassociated: ";
     // for (auto g : unassociatedObs) {
     //     std::cout << g.frameId << ", ";
@@ -240,16 +255,20 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             for (auto& obs : kfObs) std::cout << obs.frameId << "(" << obs.cloud.size() << "), ";
             std::cout << " sending..." << std::endl;
         }
-        publishAllPoints(bigPcPtr, kfObs.begin()->frameId, "sensor_frame");
+
+        if (pubAllPoints) {
+            sensor_msgs::PointCloud2 allPointsMsg;
+            pcl::toROSMsg(*bigPcPtr, allPointsMsg);
+            publishPointCloud(bigCloudPub, allPointsMsg, kfObs.begin()->frameId, "sensor_frame");
+        }
 
         // TODO talk to Bailey about efficiently deriving the cluster centers out in either nlogn or linear time
         // (maybe this greedy solution is good enough)
         // Combine them --> do standard clustering/point association
         pcl::EuclideanClusterExtraction<pcl::PointXYZ> ece;
         ece.setInputCloud(bigPcPtr);
-        // ece.setClusterTolerance(0.1); // Set the spatial cluster tolerance (in meters)
-        ece.setClusterTolerance(0.02); // Set the spatial cluster tolerance (in meters)
-        ece.setMinClusterSize(2);
+        ece.setClusterTolerance(clusterTolerance);  // Set the spatial cluster tolerance (in meters)
+        ece.setMinClusterSize(2);                   // Don't make a cluster for a single stray point 
         ece.setMaxClusterSize(maxKeyframeWidth);
         std::vector<pcl::PointIndices> cluster_indices;
         ece.extract(cluster_indices);
@@ -262,10 +281,10 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             outputCloud.push_back(pclConvert(myCentroidOutput));
         }
         
-        // TODO should timestamp of message be that of the base frame or whatever the current time is?
-        // TODO frameId be fresh for keyframes?
-        // if (outputCloud.size() > )
-        publishKeyFrame(outputCloud, kfObs.begin()->frameId, "sensor_frame");
+        // Publish then clear the keyframe
+        sensor_msgs::PointCloud2 kfMsg;
+        pcl::toROSMsg(outputCloud, kfMsg);
+        publishPointCloud(kfpub, kfMsg, kfObs.begin()->frameId, "sensor_frame");
         kfObs.clear();
         bigPcPtr->clear();  // TODO might be overkill because it gets overwritten when base frame re-inits anyway
     }
@@ -277,11 +296,6 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     }
     if (isDebug) std::cout << "===============================================================" << std::endl;
     
-
-    // if needing to debug...
-    // I'm guessing I could estimate whether a pc was transformed correctly by checking pc similarity with the other pcs
-        // I would imagine that the similarity value would be significantly bigger
-        // https://stackoverflow.com/questions/55913968/metric-to-compare-two-point-clouds-similarity
 }
 
 
@@ -291,16 +305,27 @@ int main(int argc, char **argv) {
     ros::init(argc, argv, "keyframe_maker");
     ros::NodeHandle n("~");
 
+    // booleans
     isDebug = n.param("debug", true);
+    isIndivFramePub = n.param("indivFramePub", false);
+    pubAllPoints = n.param("pubAllPoints", false);
+
+    // integers
+    numSideBoundsForMatch = n.param("numSideBoundsForMatch", 3);
     maxKeyframeWidth = n.param("maxKeyframeWidth", 5);
     numSkippedFramesBeforeSend = n.param("numSkippedFramesBeforeSend", 3);
-    polygonMatchThresh = n.param("polygonMatchThresh", 3);
-    validPointMatchThresh = n.param("validPointMatchThresh", 3);
+
+    // doubles
+    polygonMatchThresh = n.param("polygonMatchThresh", 3.0);
+    reqMatchedPolygonRatio = n.param("reqMatchedPolygonRatio", 0.5); // 0.0 disables this feature
+    validPointMatchThresh = n.param("validPointMatchThresh", 1.0);
     clusterTolerance = n.param("clusterTolerance", 0.1);
 
     ros::Subscriber sub = n.subscribe("/sim_path/local_points", 10, parse2DPC);
     kfpub = n.advertise<sensor_msgs::PointCloud2>("keyframe", 10);
-    bigCloudPub = n.advertise<sensor_msgs::PointCloud2>("allPoints", 10);
+
+    if (isIndivFramePub) hierPub = n.advertise<std_msgs::String>("hierarchy", 10);
+    if (pubAllPoints) bigCloudPub = n.advertise<sensor_msgs::PointCloud2>("allPoints", 10);
 
     ros::spin();
 

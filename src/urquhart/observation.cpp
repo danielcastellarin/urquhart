@@ -37,11 +37,31 @@ void Observation::computeHierarchy() {
     urquhartTesselation();
 }
 
-void Observation::recomputeEdgeLengths() {
+void Observation::recomputeEdgeLengthsAndDescriptors() {
+    // Recompute all polygon descriptors once
     for (Eigen::Index i = 0; i < triangulationEdges.cols(); ++i) {
         triangulationEdgeLengths(i) = euclideanDistance2D(landmarks.col(triangulationEdges(0, i)), landmarks.col(triangulationEdges(1, i)));
     }
-    // TODO probably should recompute each polygon's descriptors too
+
+    // Recompute all polygon descriptors once
+    for (const auto& pIdx : hier->getChildrenIds(0)) {  // Iterate over polygons
+        hier->getPolygon(pIdx).recomputeDescriptor(landmarks, triangulationEdgeLengths);
+        if (hier->getPolygon(pIdx).n > 3) {
+            for (const auto& tIdx : hier->getChildrenIds(pIdx)) {   // Iterate over triangles
+                hier->getPolygon(tIdx).recomputeDescriptor(landmarks, triangulationEdgeLengths);
+            }
+        }
+    }
+}
+
+PtLoc Observation::tfLdmk(Eigen::Index colNum, const Eigen::Matrix3d& tf) {
+    // Obtain the position of this tree in the global frame
+    Eigen::Matrix3d localPointTf {
+        {1, 0, landmarks(0, colNum)},
+        {0, 1, landmarks(1, colNum)},
+        {0, 0, 1},
+    };
+    return (tf * localPointTf)(Eigen::seq(0,1), 2);
 }
 
 
