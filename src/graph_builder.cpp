@@ -23,6 +23,10 @@
 #include <ros/package.h>
 
 
+// @@@@@@@@@@@@@@@@@@
+// @ MISC FUNCTIONS @
+// @@@@@@@@@@@@@@@@@@
+
 // A hash function used to hash a pair of any kind
 struct hash_pair {
     template <class T1, class T2>
@@ -52,68 +56,24 @@ void writeHierarchyFiles(const urquhart::Observation& trees, std::string filePat
     dscOut.close();
 }
 
-
-Eigen::Matrix4d computeRigid2DEuclidTf(const Points& localLandmarks, const Points& globalLandmarks, const std::vector<std::pair<Eigen::Index, Eigen::Index>>& pointMatchRefs) {
-    Eigen::MatrixXd A(pointMatchRefs.size()+pointMatchRefs.size(), 4);
-    Eigen::VectorXd b(pointMatchRefs.size()+pointMatchRefs.size());
-    // TODO if not all matches valid, count how many of them are, then do conservativeResize at the end to crop out extra space
-
-    // https://math.stackexchange.com/questions/77462/finding-transformation-matrix-between-two-2d-coordinate-frames-pixel-plane-to
-    int startRow = 0;
-    for (const auto& [lIdx, gIdx] : pointMatchRefs) {
-        // TODO perform more elegant block assignments here
-        A.row(startRow)   = (Eigen::Vector4d() << localLandmarks(0, lIdx), -localLandmarks(1, lIdx), 1, 0).finished().transpose();
-        A.row(startRow+1) = (Eigen::Vector4d() << localLandmarks(1, lIdx),  localLandmarks(0, lIdx), 0, 1).finished().transpose();
-        b[startRow]   = globalLandmarks(0, gIdx);
-        b[startRow+1] = globalLandmarks(1, gIdx);
-        startRow += 2;
-    }
-
-    // https://www.cs.cmu.edu/~16385/s17/Slides/10.1_2D_Alignment__LLS.pdf <-- slide 24
-    // x = (A^T A)^-1 A^T b
-    Eigen::Vector4d x = (A.transpose() * A).inverse() * A.transpose() * b;
-
-    // Return the 4x4 matrix to transform frames: reference --> target
-    return Eigen::Matrix4d{
-        {x[0], -x[1], 0, x[2]},
-        {x[1],  x[0], 0, x[3]},
-        {   0,     0, 1,    0},
-        {   0,     0, 0,    1}
+Eigen::Matrix3d v2t(Eigen::Vector3d vec) {
+    double c = cos(vec(2)), s = sin(vec(2));
+    return Eigen::Matrix3d {
+        {c, -s, vec(0)},
+        {s,  c, vec(1)},
+        {0,  0,      1}
     };
 }
 
+Eigen::Vector3d t2v(Eigen::Matrix3d tf) { 
+    return Eigen::Vector3d{tf(0,2), tf(1,2), atan2(tf(1,0), tf(0,0))};
+}
 
-/*
-    For every n individual frames, construct a keyframe K (using the following customized local bundle adjustment steps) (NOTE: n should be chosen based on the robot's speed and observation range, such that sequential keyframes exhibit partial overlap for the observed landmarks)
-        For each individual frame (a set of 2D landmarks given as input), construct the local geometric hierarchy (triangulation, polygons, etc.)
-            Perform data association with the previous frame, ideally making enough links between the landmarks in each frame
-            If a certain proportion of landmarks per frame do not have associations, perform association with preceeding frames until that is fixed
-        Once enough associations have been made for the current individual frame, perform RANSAC and estimate the current position of the robot
-        After all n frames have been processed, approximate the true positions of each landmark w.r.t. the fixed reference point (the location of the robot in either the first or last individual frame)
-        At this point, keyframe K should consist of a robot pose, a set of 2D landmark positions, and a newly constructed geometric hierarchy for the finalized positions of the landmarks (throw away everything else)
-    
-    vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-    Using the geometric hierarchy from keyframe K, perform point association with the global geometric hierarchy
-        Maybe use the current odometry estimate from the global map to restrict the number of global polygons that would be eligible for matching with the local keyframe polygons
-        If not enough matches are made, then the search space could incrementally expand to include more polygons. if this is too complicated, then we could just query all the global polygons and call it a day
-    
-    Once enough associations have been made, use RANSAC to estimate the current position of the robot with respect to the global reference frame
-    
-    Create graph nodes and edges:
-        A new node Xi for the new position of the robot with respect to the global reference frame and other nodes for any newly observed landmarks from the most recent keyframe
-        A new edge between Xi and Xi-1 (representing robot odometry)
-        A new edge between Xi and the nodes corresponding to each landmark observed in this keyframe (representing the spatial relationship between the robot and the observed landmarks at the time of this keyframe)
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-    Using the updated graph structure, run back-end optimization to provide better robot pose and landmark location estimates
-    
-    Perform the following customized global bundle adjustment steps to ensure that I am making the minimum required changes to the global map to keep the system accurate and stable over time
-        TODO: somehow use the intermediary outputs from the back-end optimization process to measure how much the landmark positions have changed?
-        If enough landmarks have been noticeably moved and/or have added to the global map, recompute the global geometric hierarchy
-            Potentially only do complete triangulation and polygon recomputation for specific region of the global map, otherwise just adjust point locations without modifying the configuration of parent triangles or polygons (which I imagine is much more scalable)
 
-*/
-
+// @@@@@@@@@@@@@@@@@@@@@
+// @ GRAPHSLAM STRUCTS @
+// @@@@@@@@@@@@@@@@@@@@@
 
 struct PoseNode { // Pose derived from matching local shapes with global representation
     int id, stateVectorIdx;
@@ -154,25 +114,10 @@ struct PLEdge {
     }
 };
 
-// USED ONLY FOR GRAPHSLAM MATH
-Eigen::Matrix3d v2t(Eigen::Vector3d vec) {
-    double c = cos(vec(2)), s = sin(vec(2));
-    return Eigen::Matrix3d {
-        {c, -s, vec(0)},
-        {s,  c, vec(1)},
-        {0,  0,      1}
-    };
-}
-
-Eigen::Vector3d t2v(Eigen::Matrix3d tf) { 
-    return Eigen::Vector3d{tf(0,2), tf(1,2), atan2(tf(1,0), tf(0,0))};
-}
-
-
 
 struct SLAMGraph {
     std::shared_ptr<urquhart::Observation> geoHier = NULL;
-    Eigen::VectorXd stateVector; // stored as eigen vector for faster computations??
+    Eigen::VectorXd stateVector;
 
     std::vector<PoseNode> poseNodeList;
     std::vector<LandmarkNode> landmarkNodeList; // These should align with "landmarks" in Observation
@@ -417,6 +362,7 @@ struct SLAMGraph {
         bool goodChange = true;
 
         // Validate output: make sure nothing changed too much
+        // TODO use aggregated global error related to last pose to prompt rollback 
         if (isDebug) {
             Eigen::Vector3d diffPose;
             for (const auto& node : poseNodeList) {
@@ -479,7 +425,6 @@ struct SLAMGraph {
 Eigen::Matrix3d tfFromSubsetMatches(const Points& localLandmarks, const Points& globalLandmarks, const std::vector<std::pair<Eigen::Index, Eigen::Index>>& pointMatchRefs, const std::vector<int>& indices, int numMatches) {
     Eigen::MatrixXd A(numMatches+numMatches, 4);
     Eigen::VectorXd b(numMatches+numMatches);
-    // TODO if not all matches valid, count how many of them are, then do conservativeResize at the end to crop out extra space
 
     // https://math.stackexchange.com/questions/77462/finding-transformation-matrix-between-two-2d-coordinate-frames-pixel-plane-to
     int startRow = 0;
@@ -510,12 +455,13 @@ Eigen::Matrix3d tfFromSubsetMatches(const Points& localLandmarks, const Points& 
 // ratio of outliers to cause exit (r) = 0.99
 // max iterations (s) = 40000
 using GlobalPt = std::pair<Eigen::Index, PtLoc>;
-void estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
+bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
         const std::vector<std::pair<Eigen::Index, Eigen::Index>>& allMatches,
         std::unordered_map<Eigen::Index, GlobalPt>& acceptedMatches,
         Eigen::Vector3d& bestTf, std::vector<GlobalPt>& unmatchedLocals,
         int maxIter, int reqMatchesForTf, double threshForValidAssoc, double threshForAssocNetEligibility, double matchRatio)
 {
+    bool hasEstimate = false;
     std::random_device randomDevice;
     std::mt19937 rng(randomDevice());
     // rng.seed(10);
@@ -585,29 +531,24 @@ void estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
             acceptedMatches = invertedGoodMatchesSoFar;
             bestTf = t2v(tf);
             unmatchedLocals = unmatchedPoints;
+            hasEstimate = true;
         }
     }
-
-    // // TODO unsure if this is necessary anymore
-    // // if for some reason no matches were accepted, set the tf to be the original estimated by all the naive GH matches
-    // if (acceptedMatches.empty()) {
-    //     bestTf = t2v(tfFromSubsetMatches(localLandmarks, globalLandmarks, allMatches, indices, allMatches.size()));
-    // }
+    return hasEstimate;
 }
 
 
-
+// @@@@@@@@@@@@@@@@@@@@
+// @ GLOBAL VARIABLES @
+// @@@@@@@@@@@@@@@@@@@@
 
 SLAMGraph g;
-Eigen::Vector3d mostRecentGlobalPose; // if not tracking updates to all previous robot poses
 
 // Global variables for Association Network
-using PointRef = std::pair<int, int>;   // <frameID, cloudIdx>
+using PointRef = std::pair<int, int>;   // <frameID, ldmkIdx>
 using AssocSet = std::unordered_set<PointRef, hash_pair>;
 std::unordered_map<PointRef, AssocSet, hash_pair> unresolvedLandmarks;
 std::map<int, Points> activeObsWindow;
-
-
 
 // Output options (screen, logs, realtime)
 bool isConsoleDebug = false, isLogging = false, isRealtimeVis = false;
@@ -628,6 +569,10 @@ int minAssocForNewLdmk, associationWindowSize;
 
 
 
+// @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+// @ ASSOCIATION NETWORK HELPER METHODS @
+// @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
 bool canFormKClique(const AssocSet& a, const AssocSet& b, const int &k) {
     // Escape early if the old point does not have enough associations to belong to a k-clique
     if (a.size() < k) return false;
@@ -647,6 +592,11 @@ void deleteTreeAssoc(std::unordered_map<PointRef, AssocSet, hash_pair>& map, Poi
     map.erase(treeRefToDelete);
 }
 
+
+
+// @@@@@@@@@@@@@@@@@
+// @ NODE CALLBACK @
+// @@@@@@@@@@@@@@@@@
 
 void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     if (isConsoleDebug) std::cout << "Received keyframe " << cloudMsg->header.seq << std::endl;
@@ -670,6 +620,11 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
     // Do different things depending on whether the global map is available
     if (g.geoHier == NULL) {
+
+        // %%%%%%%%%%%%%%%%%%%%%%%%%
+        // Global Map Initialization 
+        // %%%%%%%%%%%%%%%%%%%%%%%%%
+
         // TODO determine what gets done when the global map is unavailable (might also occur when keyframe does not match with anything on the map)
         //      maybe I could modify the matching procedure a bit to iteratively loosen the matching constraints if not enough matches are found?
 
@@ -945,9 +900,10 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // if (isConsoleDebug) std::cout << "Optimized tree positions:\n" << g.geoHier->landmarks.transpose() << std::endl;
 
 
-        // %%%%%%%%%%%%%%%%%%%%%%%%%%
-        // Geometric Hierarchy Update
-        // %%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        // %%%%%%%%%%%%%%%%%
+        // Global Map Upkeep    (TODO improve geometric hierarchy update)
+        // %%%%%%%%%%%%%%%%%
 
         // Overwrite or amend the geometric hierarchy depending on whether new landarks were found
         if (unmatchedGlobalPoints.size() > 0) {
@@ -970,6 +926,9 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         }
 
         
+        // %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        // Geometric Hierarchy Incremental Update
+        // %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
         // NOTE g.geoHier polygons will be handled below
         //      If we assume that the landmark nodes hold references to the points in the geometric hierarchy,
@@ -996,6 +955,10 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // decide whether polygon "edgeLengths" and "descriptor" should be updated too  
 
     }
+
+    // %%%%%%%%%%%%%%%%%%%%%%%
+    // Post-Computation Output
+    // %%%%%%%%%%%%%%%%%%%%%%%
 
     if (isConsoleDebug) std::cout << "-------------------------------------------------------------------" << std::endl;
 
@@ -1044,8 +1007,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 }
 
 
-// TODO consolidate logging to single directory for all nodes in pipeline
-// Validate matches in global are within twice the observation radius of the robot
+// TODO Validate matches in global are within twice the observation radius of the robot
 
 // TODO Store rejected keyframes for a little bit
 // Try matching them together to build additional maps
@@ -1084,40 +1046,11 @@ int main(int argc, char **argv) {
     associationWindowSize = n.param("associationWindowSize", 8);        // # sequential observations in a window
     ptAssocThresh = n.param("ptAssocThresh", 1.0);                      // meters (distance for association in network)
 
-
-    // if (isLogging) {
-    //     std::cout << "Creating output directory: '" << outputPath << "' ... ";
-    //     std::filesystem::remove_all(outputPath);
-    //     std::filesystem::create_directory(outputPath);
-    //     std::filesystem::create_directory(outputPath+"/global");
-    //     std::filesystem::create_directory(outputPath+"/global/p");
-    //     std::filesystem::create_directory(outputPath+"/global/d");
-    //     std::filesystem::create_directory(outputPath+"/global/t");
-    //     std::filesystem::create_directory(outputPath+"/global/h");
-    //     std::filesystem::create_directory(outputPath+"/global/graph_nodes");
-    //     std::filesystem::create_directory(outputPath+"/global/graph_edges");
-    //     // std::filesystem::create_directory(outputPath+"/global/err");
-    //     std::filesystem::create_directory(outputPath+"/local");
-    //     std::filesystem::create_directory(outputPath+"/local/p");
-    //     std::filesystem::create_directory(outputPath+"/local/d");
-    //     std::filesystem::create_directory(outputPath+"/local/t");
-    //     std::filesystem::create_directory(outputPath+"/local/h");
-    //     std::filesystem::create_directory(outputPath+"/local/pts");
-    //     std::filesystem::create_directory(outputPath+"/match");
-    //     std::filesystem::create_directory(outputPath+"/finalAssoc");
-    //     std::cout << "   Done!" << std::endl;
-    // }
-
-    // ros::Rate pub_rate(cfg.pubRate);    // 10Hz by default
-
     
     ros::Subscriber sub = n.subscribe("/keyframe_maker/keyframe", 10, constructGraph);
     hierPub = n.advertise<std_msgs::String>("hierarchy", 10);
     graphPub = n.advertise<std_msgs::String>("graph", 10);
-    
-
     ros::spin();
-
 
     return 0;
 }

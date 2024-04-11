@@ -16,25 +16,31 @@ sim_path:
   # randomSeed: 17
   debug: false
 
+
 keyframe_maker:
   debug: false
   indivFramePub: false
+  pubAllPoints: false
+
   maxKeyframeWidth: 5
   numSkippedFramesBeforeSend: 3
+
   polygonMatchThresh: 3
   validPointMatchThresh: 0.75
+  
   clusterTolerance: 0.3
+
 
 graph_builder:
   consoleDebug: true
-  realtimeVis: false
+  realtimeVis: true
 
   polyMatchThreshStart: 2.0     # Tight polygon match threshold
   polyMatchThreshStep: 0.5
   numSideBoundsForMatch: 3
   reqMatchedPolygonRatio: 0.5   # TODO maybe increase this
   
-  ransacMaxIter: 100
+  ransacMaxIter: 75
   ransacMatchPrereq: 16         # relatively high, we want a lot of matches to sample from
   ransacMatchSampleSize: 2      # low as possible, want each sample to have low probability to have poor match affecting TF
   ransacValidAssocThresh: .05   # EXTREMELY LOW, only want to match points we that CERTAINLY match
