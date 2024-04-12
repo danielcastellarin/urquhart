@@ -32,7 +32,7 @@ struct SimConfig
 
         // Required parameters
         nh.param<std::string>("forestFile", forestFile, "coolForest.txt");
-        forest = readForestFile(absolutePackagePath + forestFile);
+        forest = readForestFile(absolutePackagePath + "forests/" + forestFile);
         nh.param<std::string>("pathType", pathType, "circle");
         distanceToTravel = nh.param("distanceToTravel", 100);
         distanceBetweenObservations = nh.param("distanceBetweenObservations", 0.2);

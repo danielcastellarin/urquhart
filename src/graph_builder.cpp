@@ -553,7 +553,7 @@ std::map<int, Points> activeObsWindow;
 // Output options (screen, logs, realtime)
 bool isConsoleDebug = false, isLogging = false, isRealtimeVis = false;
 ros::Publisher graphPub, hierPub;
-std::string outputPath;
+std::string outputPath, startingMap;
 
 // Parameters for keyframe-global polygon matching
 double polyMatchThresh, polyMatchThreshStep, reqMatchedPolygonRatio;
@@ -622,7 +622,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     if (g.geoHier == NULL) {
 
         // %%%%%%%%%%%%%%%%%%%%%%%%%
-        // Global Map Initialization 
+        // Global Map Initialization
         // %%%%%%%%%%%%%%%%%%%%%%%%%
 
         // TODO determine what gets done when the global map is unavailable (might also occur when keyframe does not match with anything on the map)
@@ -674,6 +674,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Do nothing else because we need to get more observations before optimizing
 
+
+
     } else {
 
         // %%%%%%%%%%%%%%%%%%%%%%%%
@@ -711,7 +713,6 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             matOut.close();
         }
 
-        // std::cout << "If I were to use all these matches, I'd end up with this transform:\n" << computeRigid2DEuclidTf(localObs.landmarks, g.geoHier->landmarks, matchingPointIndices) << std::endl;
 
         // %%%%%%%%%%%%%%%%%%%%
         // Transform Estimation
@@ -721,17 +722,20 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         std::unordered_map<Eigen::Index, GlobalPt> goodAssociationMap;
         Eigen::Vector3d bestGlobalRobotPose;
         std::vector<GlobalPt> unmatchedGlobalPoints;
-        estimateBestTf(localObs.landmarks, 
-                        g.geoHier->landmarks, 
-                        matchingPointIndices, 
-                        goodAssociationMap, 
-                        bestGlobalRobotPose, 
-                        unmatchedGlobalPoints, 
-                        ransacMaxIter, 
-                        ransacMatchSampleSize, 
-                        ransacValidAssocThresh, 
-                        ransacAssocNetThresh,
-                        ransacMatchRatio);
+        if (!estimateBestTf(localObs.landmarks,
+                            g.geoHier->landmarks, 
+                            matchingPointIndices, 
+                            goodAssociationMap, 
+                            bestGlobalRobotPose, 
+                            unmatchedGlobalPoints, 
+                            ransacMaxIter, 
+                            ransacMatchSampleSize, 
+                            ransacValidAssocThresh, 
+                            ransacAssocNetThresh,
+                            ransacMatchRatio)) {
+            if (isConsoleDebug) std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because all potential matches could not be verified." << std::endl;
+            return;
+        }
 
         // LOG FINAL ASSOCIATIONS
         if (isLogging) { // TODO save the final associations and new landmarks so the visualization can color them differently
@@ -839,7 +843,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         std::vector<int> existingLdmkIds, newLdmkIds;
 
         // Define a new node and edge for the robot's estimated odometry
-        g.addPPEdge(bestGlobalRobotPose);
+        if (g.poseNodeList.size() > 0) g.addPPEdge(bestGlobalRobotPose);
+        else g.addPoseNode(bestGlobalRobotPose);
 
         // Add constraints for all local points that matched with existing landmarks
         for (const auto& [gIdx, localInGlobal] : goodAssociationMap) {
@@ -1046,10 +1051,46 @@ int main(int argc, char **argv) {
     associationWindowSize = n.param("associationWindowSize", 8);        // # sequential observations in a window
     ptAssocThresh = n.param("ptAssocThresh", 1.0);                      // meters (distance for association in network)
 
-    
+    // Initialize with map (if desired)
+    n.param<std::string>("startingMap", startingMap, "");
+    if (!startingMap.empty()) {
+        startingMap = absolutePackagePath+"/maps/"+startingMap;
+        if (std::filesystem::exists(startingMap)) {
+            // TODO hook this up with the other forest read method to include radii in landmarks
+            std::cout << "Initializing global map with data from '" << startingMap << "'" << std::endl;
+            std::vector<PtLoc> intake;
+            double xPosition, yPosition;
+            std::string line;
+
+            // Read tree positions from file
+            std::ifstream infile(startingMap);
+            while (std::getline(infile, line)) {
+                std::istringstream iss(line);
+                if (iss >> xPosition >> yPosition) intake.push_back(PtLoc{xPosition, yPosition});
+            }
+            infile.close();
+            
+            // Add landmarks to graph
+            Points landmarks(2, intake.size());
+            for (int i = 0; i < intake.size(); ++i) {
+                landmarks.col(i) = intake[i];
+                g.addLandmarkNode(i, intake[i]);    // maybe TODO need to only initialize nodes for landmarks the robot sees? 
+            }
+            // Save global geometric hierarchy
+            if (intake.size() > 0) {
+                urquhart::Observation globalMap(landmarks);
+                std::make_shared<urquhart::Observation>(std::move(globalMap));
+
+            } else std::cout << "'" << startingMap << "' did not contain a valid map, ignoring..." << std::endl;
+        } else std::cout << "Could not find map at '" << startingMap << "', ignoring..." << std::endl;
+    }
+
+    // Initialize Pubs/Subs
     ros::Subscriber sub = n.subscribe("/keyframe_maker/keyframe", 10, constructGraph);
-    hierPub = n.advertise<std_msgs::String>("hierarchy", 10);
-    graphPub = n.advertise<std_msgs::String>("graph", 10);
+    if (isRealtimeVis) {
+        hierPub = n.advertise<std_msgs::String>("hierarchy", 10);
+        graphPub = n.advertise<std_msgs::String>("graph", 10);
+    }
     ros::spin();
 
     return 0;
