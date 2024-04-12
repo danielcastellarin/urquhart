@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
         // obs2.view();
 
         std::cout << "Matching Time: " << std::endl;
-        auto matches = matching::hierarchyIndexMatching(obs1, obs2, 5);
+        auto matches = matching::hierarchyIndexMatching(obs1, obs2, 5, 3, 0.5);
         for (const auto& [refIdx, targIdx] : matches) {
             std::cout << obs1.ldmkX(refIdx) << "," << obs1.ldmkY(refIdx) << "|";
             std::cout << obs2.ldmkX(targIdx) << "," << obs2.ldmkY(targIdx) << std::endl;

@@ -4,17 +4,17 @@ namespace matching
 {
 
 std::vector<std::pair<Eigen::Index, Eigen::Index>> hierarchyIndexMatching(const urquhart::Observation &ref,
-                                                        const urquhart::Observation &targ, double thresh)
+                                                        const urquhart::Observation &targ, double thresh, int numSideBoundsForMatch, double reqMatchedPolygonRatio)
 {
     std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;    
 
     // Polygon Matching (Level 2)
-    polygonMatching(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), thresh, polygonMatches);
+    polygonMatching(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), thresh, numSideBoundsForMatch, 0, polygonMatches);
 
     // Triangle Matching (Level 1)
     for (const auto& [refPoly, targPoly] : polygonMatches) {
         // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-        polygonMatching(ref, ref.hier->getChildrenIds(refPoly), targ, targ.hier->getChildrenIds(targPoly), thresh, triangleMatches);
+        polygonMatching(ref, ref.hier->getChildrenIds(refPoly), targ, targ.hier->getChildrenIds(targPoly), thresh,  numSideBoundsForMatch, reqMatchedPolygonRatio, triangleMatches);
     }
 
     // Vertex Matching (Level 0)
@@ -24,7 +24,7 @@ std::vector<std::pair<Eigen::Index, Eigen::Index>> hierarchyIndexMatching(const 
 std::vector<std::pair<Eigen::Index, Eigen::Index>> nonGreedyHierarchyIndexMatching(const urquhart::Observation &ref,
                                                         const urquhart::Observation &targ, double thresh, int numSideBoundsForMatch, double reqMatchedPolygonRatio)
 {
-    std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;    
+    std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
 
     // Polygon Matching (Level 2)
     nonGreedyPolygonMatching(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), thresh, numSideBoundsForMatch, 0, polygonMatches);
@@ -40,9 +40,11 @@ std::vector<std::pair<Eigen::Index, Eigen::Index>> nonGreedyHierarchyIndexMatchi
 
 void polygonMatching(
         const urquhart::Observation &ref, std::unordered_set<int> refIds,
-        const urquhart::Observation &targ, std::unordered_set<int> targIds, double thresh,
+        const urquhart::Observation &targ, std::unordered_set<int> targIds,
+        double thresh, int numSideBoundsForMatch, double reqMatchedPolygonRatio,
         std::vector<std::pair<size_t, size_t>> &polygonMatches)
 {
+    int numExistingMatches = polygonMatches.size();
     std::set<size_t> matched;
 
     // For each reference Polygon, try to find its best matching polygon in the target set
@@ -56,7 +58,7 @@ void polygonMatching(
                 urquhart::Polygon tp = targ.hier->getPolygon(tIdx);
 
                 // Only attempt a match if the number of vertices each polygon has is within 3 of each other
-                if (std::abs(rp.n - tp.n) <= 3) {
+                if (std::abs(rp.n - tp.n) <= numSideBoundsForMatch) {
                     double d = descriptorDistance(rp.descriptor, tp.descriptor);
                     if (d < bestDist) {
                         bestDist = d;
@@ -65,11 +67,14 @@ void polygonMatching(
                 }
             }
         }
-        // Store a match for later if one is found; early bird gets the worm here
+        // Store a match for later if one is found; "early bird gets the worm"
         if (bestDist < thresh) {
             matched.insert(bestMatch);
             polygonMatches.push_back({rIdx, bestMatch});
         }
+
+        // Invalidate these matches if not enough of them were made
+        if (polygonMatches.size() - numExistingMatches < reqMatchedPolygonRatio * refIds.size()) polygonMatches.resize(numExistingMatches);
     }
 }
 

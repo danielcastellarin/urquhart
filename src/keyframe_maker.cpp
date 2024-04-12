@@ -84,7 +84,7 @@ Eigen::Matrix4d computeRigid2DEuclidTfFromIndices(const std::vector<std::pair<Ei
 
 std::vector<std::pair<Eigen::Index, Eigen::Index>> matchObsIdx(const urquhart::Observation &ref, const urquhart::Observation &targ, double polyMatchThresh, double pointMatchThresh) {
     // Perform traditional data association
-    // std::vector<std::pair<Eigen::Index, Eigen::Index>> finalVertexMatches, vertexMatches = matching::hierarchyIndexMatching(ref, targ, polyMatchThresh);
+    // std::vector<std::pair<Eigen::Index, Eigen::Index>> finalVertexMatches, vertexMatches = matching::hierarchyIndexMatching(ref, targ, polyMatchThresh, numSideBoundsForMatch, reqMatchedPolygonRatio);
     std::vector<std::pair<Eigen::Index, Eigen::Index>> finalVertexMatches, vertexMatches = matching::nonGreedyHierarchyIndexMatching(ref, targ, polyMatchThresh, numSideBoundsForMatch, reqMatchedPolygonRatio);
 
     // Post-process: double-check matches, remove any where pairs are beyond a certain distance from each other

@@ -199,13 +199,13 @@ struct RobotHistory
             std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
 
             // Polygon Matching (Level 2)
-            matching::polygonMatching(currentObs, currentObs.hier->getChildrenIds(0), prevObs, prevObs.hier->getChildrenIds(0), 5, polygonMatches);
+            matching::polygonMatching(currentObs, currentObs.hier->getChildrenIds(0), prevObs, prevObs.hier->getChildrenIds(0), 5, 3, 0, polygonMatches);
             consecutivePolyMatches[obsIdx] = polygonMatches;
 
             // Triangle Matching (Level 1)
             for (const auto& [refPoly, targPoly] : polygonMatches) {
                 // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-                matching::polygonMatching(currentObs, currentObs.hier->getChildrenIds(refPoly), prevObs, prevObs.hier->getChildrenIds(targPoly), 5, triangleMatches);
+                matching::polygonMatching(currentObs, currentObs.hier->getChildrenIds(refPoly), prevObs, prevObs.hier->getChildrenIds(targPoly), 5, 3, 0.5, triangleMatches);
             }
             consecutiveTriMatches[obsIdx] = triangleMatches;
 

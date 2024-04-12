@@ -3,7 +3,8 @@
     <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/big_square.yaml" command="load" /> -->
     <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/config_that_works.yaml" command="load" /> -->
     <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/circle_edgemap.yaml" command="load" /> -->
-    <rosparam file="$(find urquhart)/run_configs/geoSLAM/stab_test1.yaml" command="load" />
+    <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/stab_test1.yaml" command="load" /> -->
+    <rosparam file="$(find urquhart)/run_configs/geoSLAM/exis_map.yaml" command="load" />
     <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/graph_bad_assoc.yaml" command="load" /> -->
     <node pkg="urquhart" type="CreateLogs" name="log_setup" output="screen" />
     

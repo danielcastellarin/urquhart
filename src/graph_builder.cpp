@@ -691,8 +691,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         std::vector<std::pair<Eigen::Index, Eigen::Index>> matchingPointIndices;
         int maxIter = 100, numIt = 0;
         do {
-            // matchingPointIndices = matching::hierarchyIndexMatching(localObs, *g.geoHier, matchingThresh);
-            matchingPointIndices = matching::nonGreedyHierarchyIndexMatching(localObs, *g.geoHier, matchingThresh, numSideBoundsForMatch, reqMatchedPolygonRatio);
+            matchingPointIndices = matching::hierarchyIndexMatching(localObs, *g.geoHier, matchingThresh, numSideBoundsForMatch, reqMatchedPolygonRatio);
+            // matchingPointIndices = matching::nonGreedyHierarchyIndexMatching(localObs, *g.geoHier, matchingThresh, numSideBoundsForMatch, reqMatchedPolygonRatio);
             matchingThresh += polyMatchThreshStep;
         } while (matchingPointIndices.size() < ransacMatchPrereq && ++numIt < maxIter);
 
@@ -1079,7 +1079,7 @@ int main(int argc, char **argv) {
             // Save global geometric hierarchy
             if (intake.size() > 0) {
                 urquhart::Observation globalMap(landmarks);
-                std::make_shared<urquhart::Observation>(std::move(globalMap));
+                g.geoHier = std::make_shared<urquhart::Observation>(std::move(globalMap));
 
             } else std::cout << "'" << startingMap << "' did not contain a valid map, ignoring..." << std::endl;
         } else std::cout << "Could not find map at '" << startingMap << "', ignoring..." << std::endl;

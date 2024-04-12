@@ -78,7 +78,7 @@ int main(int argc, char* argv[]) {
         pts2Out.close();
 
         std::cout << "Matching Time: " << std::endl;
-        auto matches = matching::hierarchyIndexMatching(obs1, obs2, 5);
+        auto matches = matching::hierarchyIndexMatching(obs1, obs2, 5, 3, 0.5);
         std::ofstream matOut(num+"-m.txt");
         for (const auto& [refIdx, targIdx] : matches) {
             std::cout << obs1.ldmkX(refIdx) << "," << obs1.ldmkY(refIdx) << "|";

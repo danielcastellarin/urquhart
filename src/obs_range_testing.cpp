@@ -147,12 +147,12 @@ void matchObs(const urquhart::Observation &ref, const urquhart::Observation &tar
             std::vector<std::pair<size_t, size_t>> &polygonMatches, std::vector<std::pair<size_t, size_t>> &triangleMatches, std::vector<std::pair<PtLoc, PtLoc>> &vertexMatches) {
 
     // Polygon Matching (Level 2)
-    matching::polygonMatching(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), polyMatchThresh, polygonMatches);
+    matching::polygonMatching(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), polyMatchThresh, 3, 0, polygonMatches);
 
     // Triangle Matching (Level 1)
     for (auto pMatch : polygonMatches) {
         // TODO: ADD CHECK IF % OF TRIANGLES THAT MACTHED IS LARGER THAN 1/2
-        matching::polygonMatching(ref, ref.hier->getChildrenIds(pMatch.first), targ, targ.hier->getChildrenIds(pMatch.second), polyMatchThresh, triangleMatches);
+        matching::polygonMatching(ref, ref.hier->getChildrenIds(pMatch.first), targ, targ.hier->getChildrenIds(pMatch.second), polyMatchThresh, 3, 0.5, triangleMatches);
     }
 
     // Vertex Matching (Level 0)
