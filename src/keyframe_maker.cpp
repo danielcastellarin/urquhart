@@ -188,8 +188,9 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                 pointMatchIndices = matchObsIdx(revIter->obs, myObs.obs, polygonMatchThresh, validPointMatchThresh);
                 if (pointMatchIndices.size() >= 2) {
                     if (isDebug) std::cout << "Including frame " << revIter->frameId << " in the association." << std::endl;
-                    tfCloud(myObs.tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, revIter->obs, myObs.obs), *revIter);
-                    unassociatedObs.erase(std::next(revIter).base()); // iterator should not move
+                    tfCloud(myObs.tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, revIter->obs, myObs.obs), *revIter); 
+                    std::advance(revIter, 1);   // reverse iterators are wierd
+                    unassociatedObs.erase(revIter.base());  // iterator "advances" to look at previous value
                 }
                 else ++revIter;
             }
