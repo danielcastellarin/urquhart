@@ -86,7 +86,7 @@ struct SimConfig
 struct SimKeyframe {
     int id;
     Pose globalPose;
-    std::vector<Tree> globalTreePositions, localTreePositions;
+    std::vector<Tree> globalTreePositions, globalTreePositionsForVis, localTreePositions;
     bool isLast = false;
     SimKeyframe(int obsId, Pose pose) : id(obsId), globalPose(pose) {}
     void setLastFrame() { isLast = true; }

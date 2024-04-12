@@ -1,0 +1,5 @@
+forestSize: 1000
+treeSpacing: 9
+noiseMean: 0
+noiseStdDev: 3.5
+forestName: sparseForest

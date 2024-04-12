@@ -1,0 +1,5 @@
+forestSize: 1000
+treeSpacing: 4
+noiseMean: 0
+noiseStdDev: 2
+forestName: denseForest

@@ -104,9 +104,10 @@ SimKeyframe Path::observe() {
     // Observe trees within the robot's vicinity
     for (const Tree& t : env) {
         // Calculate the tree's position relative to the robot
-        // Record the true position of the tree relative to the global frame (for visualization purposes)
+        // Record the true position of the tree relative to the global frame
         double x = t.p.x - globalPose.p.x, y = t.p.y - globalPose.p.y, treeRadius = t.radius;
-        if (std::abs(x) < globalVisRange && std::abs(y) < globalVisRange) keyframe.globalTreePositions.push_back(t);
+        if (x*x+y*y < obsRadiusSq) keyframe.globalTreePositions.push_back(t);
+        if (std::abs(x) < globalVisRange && std::abs(y) < globalVisRange) keyframe.globalTreePositionsForVis.push_back(t);
 
         // If detection noise present, only a given percentage of potentially observable trees will actually be seen
         if (detectionNoise(rng) > successfulObservationProbability) continue;
@@ -173,7 +174,7 @@ int main(int argc, char **argv)
             // global observation visualization hack
             std::string globalPoseHack = nextObs.globalPose.printPose() + " " + std::to_string(nextObs.localTreePositions.size());
             // NOTE: apparently PCL overwrites "seq" in message header...
-            publishObservation(gpPub, nextObs.globalTreePositions, nextObs.id, globalPoseHack);
+            publishObservation(gpPub, nextObs.globalTreePositionsForVis, nextObs.id, globalPoseHack);
             // Publish data in ROS
             // publishObservation(gpPub, nextObs.globalTreePositions, nextObs.id, "global_frame");
             publishObservation(lpPub, nextObs.localTreePositions, nextObs.id, "sensor_frame");

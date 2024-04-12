@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <launch>
     <!-- Forest Configurations -->
-    <rosparam file="$(find urquhart)/run_configs/create_forest/basic_forest.yaml" command="load" />
+    <rosparam file="$(find urquhart)/run_configs/create_forest/very_dense_forest.yaml" command="load" />
 
     <!-- Node to create forest -->
     <node pkg="urquhart" type="CreateForest" name="create_forest" output="screen" />
