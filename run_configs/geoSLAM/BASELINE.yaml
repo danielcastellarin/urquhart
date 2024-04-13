@@ -1,8 +1,8 @@
 logging: true
-outputDirName: stab1
+outputDirName: BASELINE
 
 sim_path:
-  forestFile: coolForest.txt    # local from 'urquhart' package
+  forestFile: coolForest.txt
   pathType: circle
   distanceToTravel: 200
   distanceBetweenObservations: 0.2
@@ -12,8 +12,8 @@ sim_path:
   treePositionStandardDeviation: 0.1
   # landmarkAssociationThreshold: 0.8
   # treeAssociationThreshold: 0.5
-  pubRate: 5
-  # randomSeed: 17
+  pubRate: 2
+  randomSeed: 17
   debug: false
 
 
