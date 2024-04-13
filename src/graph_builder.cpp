@@ -466,113 +466,29 @@ Eigen::Matrix3d tfFromSubsetMatches(const Points& localLandmarks, const Points& 
 }
 
 
+// Original RANSAC metrics from prior work
 // euclid dist b/w points after transform (d) = 0.5
 // ratio of outliers to cause exit (r) = 0.99
 // max iterations (s) = 40000
 using GlobalPt = std::pair<Eigen::Index, PtLoc>;
-// bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
-//         const std::vector<std::pair<Eigen::Index, Eigen::Index>>& allMatches,
-//         std::unordered_map<Eigen::Index, GlobalPt>& acceptedMatches,
-//         Eigen::Vector3d& bestTf, std::vector<GlobalPt>& unmatchedLocals,
-//         int maxIter, int reqMatchesForTf, double threshForValidAssoc, double threshForAssocNetEligibility, double matchRatio)
-// {
-//     bool hasEstimate = false;
-//     Points calcMat(2, globalLandmarks.cols());
-//     std::random_device randomDevice;
-//     std::mt19937 rng(randomDevice());
-//     // rng.seed(10);
-    
-//     // Init indices to access the matches
-//     std::vector<int> indices(allMatches.size());
-//     std::iota(indices.begin(), indices.end(), 0);
-
-
-//     // Loop until we tried too many times or we found the expected number of landmark associations
-//     int expectedNumMatchedLandmarks = localLandmarks.cols() * matchRatio;
-//     for (int i = 0; i < maxIter && acceptedMatches.size() <= expectedNumMatchedLandmarks; ++i) {
-//         std::unordered_map<Eigen::Index, std::pair<Eigen::Index, PtLoc>> invertedGoodMatchesSoFar; // targ --> ref
-//         std::unordered_set<Eigen::Index> problematicGlobals;
-//         std::vector<std::pair<Eigen::Index, PtLoc>> unmatchedPoints;
-
-//         // Take random subset of matches to use for calculating the global -> local transform
-//         std::shuffle(indices.begin(), indices.end(), rng);
-//         Eigen::Matrix3d tf = tfFromSubsetMatches(localLandmarks, globalLandmarks, allMatches, indices, reqMatchesForTf);
-
-//         // TODO reduce number of globals to match against based on this transform and the maximum sensor range of the robot
-//         // Points closebyLandmarks(2, );
-
-//         Eigen::Index closestLandmarkIdx;
-//         // Match as many points in the keyframe with landmarks in the global frame
-//         for (int lIdx = 0; lIdx < localLandmarks.cols(); ++lIdx) {
-//             // Define this tree's local position as a homogeneous matrix
-//             Eigen::Matrix3d localPointTf {
-//                 {1, 0, localLandmarks(0, lIdx)},
-//                 {0, 1, localLandmarks(1, lIdx)},
-//                 {0, 0, 1},
-//             };
-//             // Obtain the position of this tree in the global frame
-//             GlobalPt gp = {lIdx, PtLoc{(tf * localPointTf)(Eigen::seq(0,1), 2)}};
-
-//             // Get the distance to the nearest global landmark (and that landmark's index)
-//             calcMat = globalLandmarks.colwise() - gp.second;
-//             double closestDistance = calcMat.colwise().squaredNorm().minCoeff(&closestLandmarkIdx);
-
-//             // Make an association with the nearest neighbor within a threshold
-//             if (closestDistance < threshForValidAssoc) {
-//                 // Ensure the closest landmark has not already been matched with something...
-//                 // Ignore the association if the closest global point was already the source of conflict with other local points
-//                 if (problematicGlobals.find(closestLandmarkIdx) != problematicGlobals.end()) {
-//                     unmatchedPoints.push_back(gp);
-
-//                 // Cancel a previous match if this local point is closest to a global point that has already been matched
-//                 } else if (invertedGoodMatchesSoFar.find(closestLandmarkIdx) != invertedGoodMatchesSoFar.end()) {
-//                     problematicGlobals.insert(closestLandmarkIdx);
-//                     unmatchedPoints.push_back(gp);
-//                     unmatchedPoints.push_back(invertedGoodMatchesSoFar[closestLandmarkIdx]);
-//                     invertedGoodMatchesSoFar.erase(closestLandmarkIdx);
-
-//                 // Otherwise, keep this association because it is probably right
-//                 } else {
-//                     invertedGoodMatchesSoFar[closestLandmarkIdx] = gp;
-//                 }
-
-//             // Elect this point for the association network if it is too far away from everything else
-//             } else if (threshForAssocNetEligibility <= closestDistance) unmatchedPoints.push_back(gp);
-//         }
-
-        
-//         // Keep this result if we have not seen anything more fitting
-//         if (invertedGoodMatchesSoFar.size() > acceptedMatches.size()) { // TODO make these copies shallow
-//             acceptedMatches = invertedGoodMatchesSoFar;
-//             bestTf = t2v(tf);
-//             unmatchedLocals = unmatchedPoints;
-//             hasEstimate = true;
-//         }
-//     }
-//     return hasEstimate;
-// }
-// auto t1 = std::chrono::high_resolution_clock::now();
-// auto t2 = std::chrono::high_resolution_clock::now();
-// auto ms_int = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
-// std::cout << ms_int.count() << "ms\n";
-
 bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
         const std::vector<std::pair<Eigen::Index, Eigen::Index>>& allMatches,
         std::unordered_map<Eigen::Index, GlobalPt>& acceptedMatches,
         Eigen::Vector3d& bestTf, std::vector<GlobalPt>& unmatchedLocals,
-        int maxIter, int reqMatchesForTf, double threshForValidAssoc, double threshForAssocNetEligibility, double matchRatio)
+        int maxIter, int reqMatchesForTf, double threshForValidAssoc, double threshForAssocNetEligibility, double matchRatio, double sensorRange)
 {
     bool hasEstimate = false;
+
+    // Preallocate space to perform matrix operations (can be quite large)
     Points calcMat(2, globalLandmarks.cols());
     Eigen::VectorXi closebyPointsMask(globalLandmarks.cols());
+    
+    // Initialize components to randomly sample landmark matches
     std::random_device randomDevice;
     std::mt19937 rng(randomDevice());
     // rng.seed(10);
-    
-    // Init indices to access the matches
     std::vector<int> indices(allMatches.size());
     std::iota(indices.begin(), indices.end(), 0);
-    auto t1 = std::chrono::high_resolution_clock::now();
 
 
     // Loop until we tried too many times or we found the expected number of landmark associations
@@ -586,16 +502,14 @@ bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
         std::shuffle(indices.begin(), indices.end(), rng);
         Eigen::Matrix3d tf = tfFromSubsetMatches(localLandmarks, globalLandmarks, allMatches, indices, reqMatchesForTf);
 
-        // Determine which landmarks are "close enough" to the pose to be observable
+        // Determine which landmarks are "observable" from the given pose
         calcMat = globalLandmarks.colwise() - tf(Eigen::seq(0,1), 2);
-        closebyPointsMask = (calcMat.array().abs() < 45).colwise().all().cast<int>();
+        closebyPointsMask = (calcMat.array().abs() < sensorRange).colwise().all().cast<int>();
         int numClosePoints = closebyPointsMask.count();
         if (numClosePoints == 0) continue;
 
-
-        // Construct a smaller matrix for squared distance computations
-        // Points closePoints(2, numClosePoints), intMat(2, numClosePoints);
-        Points closePoints(2, numClosePoints);
+        // Construct a smaller matrix of global landmark positions for squared distance computations
+        Points closePoints(2, numClosePoints), intMat(2, numClosePoints);
         Eigen::VectorXi closePointIndices(numClosePoints);
         for (int i = 0, j = 0; i < closebyPointsMask.rows(); ++i) {
             if (closebyPointsMask(i)) {
@@ -616,9 +530,9 @@ bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
             // Obtain the position of this tree in the global frame
             GlobalPt gp = {lIdx, PtLoc{(tf * localPointTf)(Eigen::seq(0,1), 2)}};
 
-            // Get the distance to the nearest global landmark (and that landmark's index)
-            // intMat = closePoints.colwise() - gp.second;
-            double closestDistance = (closePoints.colwise() - gp.second).colwise().squaredNorm().minCoeff(&closestLandmarkIdx);
+            // Get the distance to the nearest global landmark (with that landmark's index)
+            intMat = closePoints.colwise() - gp.second;
+            double closestDistance = intMat.colwise().squaredNorm().minCoeff(&closestLandmarkIdx);
             closestLandmarkIdx = closePointIndices(closestLandmarkIdx);
 
             // Make an association with the nearest neighbor within a threshold
@@ -652,14 +566,14 @@ bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
             hasEstimate = true;
         }
     }
-    auto t2 = std::chrono::high_resolution_clock::now();
-    auto ms_int = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
-    std::cout << ms_int.count() << "ms\n";
-
 
     return hasEstimate;
 }
 
+    // auto t1 = std::chrono::high_resolution_clock::now();
+    // auto t2 = std::chrono::high_resolution_clock::now();
+    // auto ms_int = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    // std::cout << ms_int.count() << "ms\n";
 
 
 // @@@@@@@@@@@@@@@@@@@@
@@ -684,7 +598,7 @@ double polyMatchThresh, polyMatchThreshStep, reqMatchedPolygonRatio;
 int numSideBoundsForMatch; 
 
 // Parameters for association filtering (my "RANSAC")
-double ransacValidAssocThresh, ransacAssocNetThresh, ransacMatchRatio;
+double ransacValidAssocThresh, ransacAssocNetThresh, ransacMatchRatio, maxSensorRange;
 int ransacMaxIter, ransacMatchPrereq, ransacMatchSampleSize;
 
 // Parameters for Association Network (new landmark discovery)
@@ -856,7 +770,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                             ransacMatchSampleSize, 
                             ransacValidAssocThresh, 
                             ransacAssocNetThresh,
-                            ransacMatchRatio)) {
+                            ransacMatchRatio,
+                            maxSensorRange)) {
             if (isConsoleDebug) std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because all potential matches could not be verified." << std::endl;
             return;
         }
@@ -1164,9 +1079,12 @@ int main(int argc, char **argv) {
     ransacMaxIter = n.param("ransacMaxIter", 20);
     ransacMatchPrereq = n.param("ransacMatchPrereq", 16);               // landmark matches via geometric hierarchy before RANSAC
     ransacMatchSampleSize = n.param("ransacMatchSampleSize", 4);        // number of matches to use when estimating TF
-    ransacValidAssocThresh = n.param("ransacValidAssocThresh", 1.0);    // meters (lower boundary) 
-    ransacAssocNetThresh = n.param("ransacAssocNetThresh", 1.5);        // meters (upper boundary)
+    ransacValidAssocThresh = n.param("ransacValidAssocThresh", 1.0);    // lower boundary (meters)
+    ransacValidAssocThresh *= ransacValidAssocThresh;                   // <-- converting to squared distance
+    ransacAssocNetThresh = n.param("ransacAssocNetThresh", 1.5);        // upper boundary (meters)
+    ransacAssocNetThresh *= ransacAssocNetThresh;                       // <-- converting to squared distance
     ransacMatchRatio = n.param("ransacMatchRatio", 1.0);                // percentage [0-1]
+    maxSensorRange = n.param("maxSensorRange", 40) * 1.1;
 
     // Association Network
     minAssocForNewLdmk = n.param("minAssocForNewLdmk", 5);              // # associations to create a new landmark
