@@ -655,6 +655,10 @@ int ransacMaxIter, ransacMatchPrereq, ransacMatchSampleSize;
 double ptAssocThresh;
 int minAssocForNewLdmk, associationWindowSize;
 
+// Rollback storage
+std::unordered_map<PointRef, AssocSet, hash_pair> unresolvedLandmarksCopy;
+bool wasLastFrameRolledBack = false;
+
 
 
 // @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
@@ -853,9 +857,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // Association Filtering
         // %%%%%%%%%%%%%%%%%%%%%
         
-        // Remember the state of the graph and its dependencies
-        // TODO maybe have this be global, set condition on rollback, check if condition true here (prevent extra copy)
-        std::unordered_map<PointRef, AssocSet, hash_pair> unresolvedLandmarksCopy = unresolvedLandmarks;
+        // Remember the state of the association network 
+        if (!wasLastFrameRolledBack) unresolvedLandmarksCopy = unresolvedLandmarks;
 
         // Store both the local and global positions of unmatched landmarks
         // idx 0,n = global; n+1,2n = local
@@ -988,7 +991,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Optimize the graph once
         if (isConsoleDebug) std::cout << "Beginning graph optimization..." << std::endl;
-        if (!g.optimizeGraph(ogStateVectorLength, ogPLEdgeLength, ogLandmarkCount, initLdmkIdxs, isConsoleDebug)) {  // TODO what if I optimized twice?
+        wasLastFrameRolledBack = !g.optimizeGraph(ogStateVectorLength, ogPLEdgeLength, ogLandmarkCount, initLdmkIdxs, isConsoleDebug);
+        if (wasLastFrameRolledBack) {  // TODO what if I did two sequential optimizations here?
             unresolvedLandmarks = unresolvedLandmarksCopy;
             return;
         }
