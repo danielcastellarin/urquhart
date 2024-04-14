@@ -229,6 +229,53 @@ struct SLAMGraph {
         return gErr;
     }
 
+    double computeRemainingGlobalError(int ogPLEdgeLength) {
+        double gErr = 0;
+
+        for (const auto& edge : ppEdges) {
+            int iStart = poseNodeList[edge.src].stateVectorIdx, jStart = poseNodeList[edge.dst].stateVectorIdx;
+            Eigen::Vector3d xI(stateVector.segment(iStart, 3)), xJ(stateVector.segment(jStart, 3)), eIJ;
+            Eigen::Matrix3d XI = v2t(xI), XJ = v2t(xJ), ZIJ = v2t(edge.distance);
+            Eigen::Matrix3d XI_inv = XI.inverse(), ZIJ_inv = ZIJ.inverse();
+
+            eIJ = t2v(ZIJ_inv * (XI_inv * XJ)); // NOTE previous 5 lines are verbatim from eIJ calc when optimizing graph; make function
+            gErr += eIJ.transpose() * edge.info * eIJ;
+        }
+
+        for (int i = 0; i < ogPLEdgeLength; ++i) {
+            int iStart = poseNodeList[plEdges[i].src].stateVectorIdx, jStart = landmarkNodeList[plEdges[i].dst].stateVectorIdx;
+            Eigen::Vector3d x(stateVector.segment(iStart, 3));
+            Eigen::Vector2d l(stateVector.segment(jStart, 2)), eIJ;
+            double s = sin(x(2)), c = cos(x(2));
+            Eigen::Matrix2d R_transposed {
+                { c, s},
+                {-s, c}
+            };
+            eIJ = (R_transposed * (l - x.head(2))) - plEdges[i].distance; // 2x1
+            gErr += eIJ.transpose() * plEdges[i].info * eIJ;
+        }
+
+        return gErr;
+    }
+
+    double getErrorFromLastPose(int firstNewLdmkConstraintIdx, int poseSVIdx, const Eigen::VectorXd& dx) {
+        Eigen::Vector3d x(stateVector.segment(poseSVIdx, 3) - dx.segment(poseSVIdx, 3));
+        double gErr = 0, s = sin(x(2)), c = cos(x(2));
+
+        for (int i = firstNewLdmkConstraintIdx; i < plEdges.size(); ++i) {
+            if (plEdges[i].src != poseNodeList.size()-1) continue;  // skip constraints describing observations from prior nodes 
+            Eigen::Vector2d l(stateVector.segment(landmarkNodeList[plEdges[i].dst].stateVectorIdx, 2) - dx.segment(landmarkNodeList[plEdges[i].dst].stateVectorIdx, 2));
+            Eigen::Matrix2d R_transposed {
+                { c, s},
+                {-s, c}
+            };
+            Eigen::Vector2d eIJ = (R_transposed * (l - x.head(2))) - plEdges[i].distance; // 2x1
+            gErr += eIJ.transpose() * plEdges[i].info * eIJ;
+        }
+
+        return gErr;
+    }
+
     double saveGlobalError(std::string filePath, std::string fileName) {
         double gErr = 0;
 
@@ -277,9 +324,10 @@ struct SLAMGraph {
         return gErr;
     }
 
-    bool optimizeGraph(bool isDebug) {
+    bool optimizeGraph(int ogStateVectorLength, int ogPLEdgeLength, int ogLandmarkCount, const std::vector<int>& initLdmkIdxs, bool isDebug) {
         
         // Initialize sparse system H and coefficient vector b with zeroes
+        // int currentStateVectorLength = stateVector.size(), stateVectorSpaceAdded = currentStateVectorLength - ogStateVectorLength;
         Eigen::MatrixXd H = Eigen::MatrixXd::Zero(stateVector.size(), stateVector.size());
         Eigen::VectorXd b = Eigen::VectorXd::Zero(stateVector.size());
         bool isFirstThereforeAddPrior = true;
@@ -369,47 +417,49 @@ struct SLAMGraph {
 
         // Solve linear system
         Eigen::VectorXd dx = H.llt().solve(b);
-        bool goodChange = true;
 
-        // Validate output: make sure nothing changed too much
-        // TODO use aggregated global error related to last pose to prompt rollback 
-        if (isDebug) {
-            Eigen::Vector3d diffPose;
-            for (const auto& node : poseNodeList) {
-                diffPose = dx.segment(node.stateVectorIdx, 3);
-                if (std::abs(diffPose(0)) > 2 || std::abs(diffPose(1)) > 2 || std::abs(diffPose(2)) > 0.5) {
-                    std::cout << "Pose node " << node.id << " changed to much, (" << diffPose.transpose() << "), cancelling optimization!!" << std::endl;
-                    goodChange = false;
-                }
+        // Determine how many edge constraints connect to the newest pose node
+        // #SV space added = 2 * #landmarks init + 3 (the pose)
+        // int numNewPLEdges = (stateVectorSpaceAdded - 3) >> 1;
+        double newPoseError = getErrorFromLastPose(ogPLEdgeLength, poseNodeList.back().stateVectorIdx, dx);
+        if (isDebug) std::cout << "This keyframe introduced an error of " << newPoseError << " to the graph." << std::endl;
+        if (newPoseError > 10000) { // TODO figure out how this threshold should be defined
+            if (isDebug) {
+                std::cout << "UH OH! Aggregated error exceeds acceptable margins, rolling back graph." << std::endl;
+                std::cout << "-------------------------------------------------------------------" << std::endl;
             }
+            // Revert stateVector to original
+            stateVector.conservativeResize(ogStateVectorLength);
+            
+            // Get rid of the bad pose info
+            poseNodeList.pop_back();
+            if (poseNodeList.size() > 0) ppEdges.pop_back();
 
-            PtLoc diffPosition;
-            for (const auto& node : landmarkNodeList) {
-                if (node.stateVectorIdx == -1) continue;
-                diffPosition = dx.segment(node.stateVectorIdx, 2);
-                if (std::abs(diffPosition(0)) > 4 || std::abs(diffPosition(1)) > 4) {
-                    std::cout << "Landmark node " << node.globalReprIdx << " changed to much, (" << diffPosition.transpose() << "), cancelling optimization!!" << std::endl;
-                    goodChange = false;
-                }
-            }
+            // Revert landmarks to original state
+            geoHier->landmarks.conservativeResize(2, ogLandmarkCount);
+            // plEdges.resize(ogPLEdgeLength);
+            // landmarkNodeList.resize(ogLandmarkCount);
+            plEdges.erase(plEdges.begin()+ogPLEdgeLength, plEdges.end());
+            landmarkNodeList.erase(landmarkNodeList.begin()+ogLandmarkCount, landmarkNodeList.end());
+            for (const auto& i : initLdmkIdxs) landmarkNodeList[i].stateVectorIdx = -1;
+
+
+            return false;
         }
-        // if ((dx.array().abs() > 2).any()) return false;
 
 
         // Update the state vector; according to the result of the system of equations
-        // stateVector -= H.llt().solve(b);
         stateVector -= dx;
 
         // Copy data from the state vector into graph nodes (for easier access)
         for (auto& node : poseNodeList) node.pose = stateVector.segment(node.stateVectorIdx, 3);
         for (auto& node : landmarkNodeList) {
-            if (node.stateVectorIdx == -1) continue;
-            geoHier->landmarks.col(node.globalReprIdx) = stateVector.segment(node.stateVectorIdx, 2);
+            if (node.stateVectorIdx != -1) geoHier->landmarks.col(node.globalReprIdx) = stateVector.segment(node.stateVectorIdx, 2);
         } 
-        globalErrors.push_back(computeGlobalError());
+        globalErrors.push_back(newPoseError + computeRemainingGlobalError(ogPLEdgeLength));
         if (isDebug) std::cout << "New global error: " << globalErrors.back();
 
-        return goodChange;
+        return true;
     }
 
     void writeGraphToFiles(std::string filePath, std::string fileName) {
@@ -639,6 +689,9 @@ void deleteTreeAssoc(std::unordered_map<PointRef, AssocSet, hash_pair>& map, Poi
 void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     if (isConsoleDebug) std::cout << "Received keyframe " << cloudMsg->header.seq << std::endl;
 
+    // Remember the state of the graph before this keyframe in case we need to do a rollback
+    // #SV space added = 2 * #landmarks init + 3 (the pose)
+
     // Take the points from the PointCloud2 message and create a geometric hierarchy from it
     pcl::PointCloud<pcl::PointXY> localCloud;
     pcl::fromROSMsg(*cloudMsg, localCloud);
@@ -799,6 +852,10 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // %%%%%%%%%%%%%%%%%%%%%
         // Association Filtering
         // %%%%%%%%%%%%%%%%%%%%%
+        
+        // Remember the state of the graph and its dependencies
+        // TODO maybe have this be global, set condition on rollback, check if condition true here (prevent extra copy)
+        std::unordered_map<PointRef, AssocSet, hash_pair> unresolvedLandmarksCopy = unresolvedLandmarks;
 
         // Store both the local and global positions of unmatched landmarks
         // idx 0,n = global; n+1,2n = local
@@ -870,15 +927,13 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             }
         }
 
-        // Store the positions of this keyframe's unassociated points
-        activeObsWindow[g.poseNodeList.size()] = keyframePoints;
-
 
         // %%%%%%%%%%%%%%%%
         // GraphSLAM Update
         // %%%%%%%%%%%%%%%%
 
-        std::vector<int> existingLdmkIds, newLdmkIds;
+        std::vector<int> existingLdmkIds, newLdmkIds, initLdmkIdxs;
+        int ogStateVectorLength = g.stateVector.size(), ogPLEdgeLength = g.plEdges.size(), ogLandmarkCount = g.landmarkNodeList.size();
 
         // Define a new node and edge for the robot's estimated odometry
         if (g.poseNodeList.size() > 0) g.addPPEdge(bestGlobalRobotPose);
@@ -886,6 +941,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Add constraints for all local points that matched with existing landmarks
         for (const auto& [gIdx, localInGlobal] : goodAssociationMap) {
+            if (g.landmarkNodeList[gIdx].stateVectorIdx == -1) initLdmkIdxs.push_back(gIdx);
             g.addPLEdge(gIdx, localObs.landmarks.col(localInGlobal.first));
             existingLdmkIds.push_back(gIdx);
         }
@@ -932,14 +988,14 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Optimize the graph once
         if (isConsoleDebug) std::cout << "Beginning graph optimization..." << std::endl;
-        bool isGood = g.optimizeGraph(isConsoleDebug);  // TODO what if I optimized twice?
-        if (!isGood) abort();
-        if (isConsoleDebug) std::cout << "   Done!" << std::endl;
-
-        if (isConsoleDebug) std::cout << "Now, we think the robot's pose is " << g.poseNodeList.back().pose.transpose() << std::endl;
-
-        // TODO add verbose debug option
-        // if (isConsoleDebug) std::cout << "Optimized tree positions:\n" << g.geoHier->landmarks.transpose() << std::endl;
+        if (!g.optimizeGraph(ogStateVectorLength, ogPLEdgeLength, ogLandmarkCount, initLdmkIdxs, isConsoleDebug)) {  // TODO what if I optimized twice?
+            unresolvedLandmarks = unresolvedLandmarksCopy;
+            return;
+        }
+        if (isConsoleDebug) {
+            std::cout << "   Done!" << std::endl;
+            std::cout << "Now, we think the robot's pose is " << g.poseNodeList.back().pose.transpose() << std::endl;
+        }
 
 
 
@@ -956,6 +1012,8 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             g.geoHier->recomputeEdgeLengthsAndDescriptors();
         }
 
+        // Store the positions of this keyframe's unassociated points
+        activeObsWindow[g.poseNodeList.size()-1] = keyframePoints;
         if (activeObsWindow.size() == associationWindowSize) {
             // Erase every unresolved tree position from the oldest observation in our window, skipping any that already became landmarks
             int frameID = activeObsWindow.begin()->first;
@@ -1008,6 +1066,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     if (isLogging) {
         writeHierarchyFiles(*g.geoHier, outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
         g.writeGraphToFiles(outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
+        // g.saveGlobalError(outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
     }
 
     // Serialize geometric hierarchy for real-time visualization
