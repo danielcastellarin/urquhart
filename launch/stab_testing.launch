@@ -3,15 +3,15 @@
     <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/big_square.yaml" command="load" /> -->
     <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/config_that_works.yaml" command="load" /> -->
     <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/circle_edgemap.yaml" command="load" /> -->
-    <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/stab_test1.yaml" command="load" /> -->
-    <rosparam file="$(find urquhart)/run_configs/geoSLAM/exis_map.yaml" command="load" />
+    <rosparam file="$(find urquhart)/run_configs/geoSLAM/stab_test1.yaml" command="load" />
+    <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/exis_map.yaml" command="load" /> -->
     <!-- <rosparam file="$(find urquhart)/run_configs/geoSLAM/graph_bad_assoc.yaml" command="load" /> -->
     <node pkg="urquhart" type="CreateLogs" name="log_setup" output="screen" />
     
     
     <!-- Simulate robot observations -->
     <node pkg="urquhart" type="ultimate_path" name="sim_path" output="screen" />
-    <!-- <node pkg="urquhart" type="live_truth_display.py" name="live_true" output="screen" /> -->
+    <node pkg="urquhart" type="live_truth_display.py" name="live_true" output="screen" />
 
     <!-- Local Bundle Adjustment Node -->
     <node pkg="urquhart" type="KeyframeGen" name="keyframe_maker" output="screen" />
@@ -28,6 +28,6 @@
 
     <!-- Global GraphSLAM Node -->
     <node pkg="urquhart" type="PolygonSLAM" name="graph_builder" output="screen" />
-    <!-- <node pkg="urquhart" type="live_graph.py" name="graph_display" output="screen" /> -->
+    <node pkg="urquhart" type="live_graph.py" name="graph_display" output="screen" />
     <!-- <node pkg="urquhart" type="ult_live.py" name="global_dash" output="screen" /> -->
 </launch>

@@ -12,7 +12,7 @@ sim_path:
   treePositionStandardDeviation: 0.1
   # landmarkAssociationThreshold: 0.8
   # treeAssociationThreshold: 0.5
-  pubRate: 5
+  pubRate: 4
   # randomSeed: 17
   debug: false
 
