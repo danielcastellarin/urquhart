@@ -22,7 +22,7 @@ if not os.path.isdir(mapDirectory):
 # Parse input in case give forest and/or map name
 parser = argparse.ArgumentParser()
 parser.add_argument("-f", "--forest", help="The name of a specific forest to analyze")
-parser.add_argument("-m", "--mapName", help="The name of a specific forest to analyze")
+parser.add_argument("-m", "--mapName", help="The name of the map to print the given forest as")
 args = parser.parse_args()
 
 # Get the name of the forest to analyze

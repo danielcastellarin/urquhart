@@ -17,6 +17,7 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <std_msgs/String.h>
 #include <ros/ros.h>
+#include <ros/package.h>
 
 
 // Observations are not associated when tf is not initialized
@@ -35,9 +36,11 @@ ros::Publisher kfpub, bigCloudPub, hierPub;
 
 std::vector<ObsRecord> unassociatedObs;
 std::set<ObsRecord> kfObs;
-bool isDebug, isIndivFramePub, pubAllPoints;
 int maxKeyframeWidth, numSkippedFramesBeforeSend, numSideBoundsForMatch;
 double polygonMatchThresh, reqMatchedPolygonRatio, validPointMatchThresh, clusterTolerance;
+bool isDebug, isIndivFramePub, pubAllPoints, isLogging;
+std::string keyframePath;
+int numFramesSent = 0;
 
 
 void publishPointCloud(ros::Publisher& pub, sensor_msgs::PointCloud2& pc2_msg, int seqID, std::string frameName) {
@@ -281,7 +284,15 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             pcl::compute3DCentroid(*bigPcPtr, indices, myCentroidOutput);
             outputCloud.push_back(pclConvert(myCentroidOutput));
         }
-        
+
+        // Log keyframe (if desired)
+        if (isLogging) {
+            std::ofstream kfOut(keyframePath+std::to_string(++numFramesSent)+".txt");
+            for (const auto& kf : kfObs) kfOut << kf.frameId << " ";
+            for (const auto& p : outputCloud) kfOut << std::endl << p.x << " " << p.y;
+            kfOut.close();
+        }
+
         // Publish then clear the keyframe
         sensor_msgs::PointCloud2 kfMsg;
         pcl::toROSMsg(outputCloud, kfMsg);
@@ -305,11 +316,15 @@ int main(int argc, char **argv) {
     // Initialize Node and read in private parameters
     ros::init(argc, argv, "keyframe_maker");
     ros::NodeHandle n("~");
+    std::string absolutePackagePath = ros::package::getPath("urquhart"), outputPath;
+    n.param<std::string>("/outputDirName", outputPath, "testOutput");
+    keyframePath = absolutePackagePath+"/output/"+outputPath+"/keyframe/";
 
     // booleans
     isDebug = n.param("debug", true);
     isIndivFramePub = n.param("indivFramePub", false);
     pubAllPoints = n.param("pubAllPoints", false);
+    isLogging = n.param("/logging", false);
 
     // integers
     numSideBoundsForMatch = n.param("numSideBoundsForMatch", 3);

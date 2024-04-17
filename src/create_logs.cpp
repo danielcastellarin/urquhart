@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
         std::filesystem::create_directory(outputPath+"/global/graph_nodes");
         std::filesystem::create_directory(outputPath+"/global/graph_edges");
         // std::filesystem::create_directory(outputPath+"/global/err");
+        std::filesystem::create_directory(outputPath+"/keyframe");
         std::filesystem::create_directory(outputPath+"/local");
         std::filesystem::create_directory(outputPath+"/local/p");
         std::filesystem::create_directory(outputPath+"/local/d");
