@@ -6,7 +6,12 @@
     
     <!-- Simulate robot observations -->
     <node pkg="urquhart" type="ultimate_path" name="sim_path" output="screen" />
-    <!-- <node pkg="urquhart" type="live_truth_display.py" name="live_true" output="screen" /> -->
+    <node pkg="urquhart" type="live_truth_display.py" name="live_true" output="screen" />
+    <!-- <group ns="sim_path">
+        <node pkg="urquhart" type="live_pc.py" name="pc_display" output="screen">
+            <param name="topicName" value="local_points" />
+        </node>
+    </group> -->
 
     <!-- Local Bundle Adjustment Node -->
     <node pkg="urquhart" type="KeyframeGen" name="keyframe_maker" output="screen" />

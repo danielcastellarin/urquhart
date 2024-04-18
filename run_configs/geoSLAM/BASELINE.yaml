@@ -12,7 +12,7 @@ sim_path:
   treePositionStandardDeviation: 0.1
   # landmarkAssociationThreshold: 0.8
   # treeAssociationThreshold: 0.5
-  pubRate: 2
+  pubRate: 6
   randomSeed: 17
   debug: false
 
@@ -32,7 +32,7 @@ keyframe_maker:
 
 
 graph_builder:
-  consoleDebug: true
+  consoleDebug: false
   realtimeVis: true
 
   polyMatchThreshStart: 2.0     # Tight polygon match threshold

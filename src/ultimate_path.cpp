@@ -94,7 +94,7 @@ bool Path::validateStartingPose() {
 }
 
 SimKeyframe Path::observe() {
-    SimKeyframe keyframe(currentObsIdx, globalPose);
+    SimKeyframe keyframe(currentObsIdx, globalPose, odomPose);
 
     // The robot's base orientation is in +y direction
     // Rotate global points points by negative theta to align with robot's current frame
@@ -187,9 +187,14 @@ int main(int argc, char **argv)
             if (cfg.isLogging) {
                 writeObservationToFile(cfg.globalPointsPath+std::to_string(nextObs.id), nextObs.globalTreePositions);
                 writeObservationToFile(cfg.localPointsPath+std::to_string(nextObs.id), nextObs.localTreePositions);
+
                 std::ofstream gposeOut(cfg.outputDirPath+"/!gp.txt", std::ios_base::app);
                 gposeOut << nextObs.globalPose.printPose() << " " << nextObs.globalPose.linearV << " " << nextObs.globalPose.angularV << std::endl;
                 gposeOut.close();
+
+                std::ofstream odomOut(cfg.outputDirPath+"/!odom.txt", std::ios_base::app);
+                odomOut << nextObs.odomPose.printPose() << " " << nextObs.globalPose.linearV << " " << nextObs.globalPose.angularV << std::endl;
+                odomOut.close();
             }
 
             // Prepare for next iteration
