@@ -36,7 +36,7 @@ ros::Publisher kfpub, bigCloudPub, hierPub;
 
 std::vector<ObsRecord> unassociatedObs;
 std::set<ObsRecord> kfObs;
-int maxKeyframeWidth, numSkippedFramesBeforeSend, numSideBoundsForMatch;
+int maxKeyframeWidth, numSkippedFramesBeforeSend, numSideBoundsForMatch, reqMatchesForFrameAssoc;
 double polygonMatchThresh, reqMatchedPolygonRatio, validPointMatchThresh, clusterTolerance;
 bool isDebug, isIndivFramePub, pubAllPoints, isLogging;
 std::string keyframePath;
@@ -134,22 +134,22 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         auto revKfIter = kfObs.rbegin();
         do {
             pointMatchIndices = matchObsIdx(myObs.obs, revKfIter->obs, polygonMatchThresh, validPointMatchThresh);
-        } while (pointMatchIndices.size() < 2 && ++revKfIter != kfObs.rend());
+        } while (pointMatchIndices.size() < reqMatchesForFrameAssoc && ++revKfIter != kfObs.rend());
 
         // Store observation data
-        if (pointMatchIndices.size() < 2) {
+        if (pointMatchIndices.size() < reqMatchesForFrameAssoc) {
             unassociatedObs.push_back(myObs);
             if (isDebug) std::cout << "No matches found." << std::endl;
         } else {
             // Estimate tf from reference to target frame (assuming we have gotten rid of outliers already)
-            if (isDebug) std::cout << "Found match with frame " << revKfIter->frameId << ", associating..." << std::endl;
+            if (isDebug) std::cout << "Found " << pointMatchIndices.size() << " matches with frame " << revKfIter->frameId << ", associating..." << std::endl;
             tfCloud(revKfIter->tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, myObs.obs, revKfIter->obs), myObs);
 
             // Try to match all unassociated observations with the current observation
             auto obsIter = unassociatedObs.begin();
             while (obsIter != unassociatedObs.end()) {
                 pointMatchIndices = matchObsIdx(obsIter->obs, myObs.obs, polygonMatchThresh, validPointMatchThresh);
-                if (pointMatchIndices.size() >= 2) {
+                if (pointMatchIndices.size() >= reqMatchesForFrameAssoc) {
                     if (isDebug) std::cout << "Also matched with frame " << obsIter->frameId << std::endl;
                     tfCloud(myObs.tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, obsIter->obs, myObs.obs), *obsIter);
                     obsIter = unassociatedObs.erase(obsIter);
@@ -166,10 +166,10 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         auto revIter = unassociatedObs.rbegin();
         do {
             pointMatchIndices = matchObsIdx(myObs.obs, revIter->obs, polygonMatchThresh, validPointMatchThresh);
-        } while (pointMatchIndices.size() < 2 && ++revIter != unassociatedObs.rend());
+        } while (pointMatchIndices.size() < reqMatchesForFrameAssoc && ++revIter != unassociatedObs.rend());
 
         // Store observation data
-        if (pointMatchIndices.size() < 2) {
+        if (pointMatchIndices.size() < reqMatchesForFrameAssoc) {
             unassociatedObs.push_back(myObs);
             if (isDebug) std::cout << "None found." << std::endl;
         } else {
@@ -179,7 +179,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             kfObs.insert(*revIter);
 
             // Estimate tf from reference to target frame (assuming we have gotten rid of outliers already)
-            if (isDebug) std::cout << "Base frame found at frame " << revIter->frameId << ", adding frame " << myObs.frameId << " behind it." << std::endl;
+            if (isDebug) std::cout << "With " << pointMatchIndices.size() << " matches, base frame " << revIter->frameId << " established; adding frame " << myObs.frameId << " behind it." << std::endl;
             tfCloud(revIter->tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, myObs.obs, revIter->obs), myObs);
             
             // Remove the base frame from the unassociated list and advance the iterator
@@ -189,9 +189,9 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             // For every remaining unassociated observation, try to match with the current observation
             while (revIter != unassociatedObs.rend()) {
                 pointMatchIndices = matchObsIdx(revIter->obs, myObs.obs, polygonMatchThresh, validPointMatchThresh);
-                if (pointMatchIndices.size() >= 2) {
-                    if (isDebug) std::cout << "Including frame " << revIter->frameId << " in the association." << std::endl;
-                    tfCloud(myObs.tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, revIter->obs, myObs.obs), *revIter); 
+                if (pointMatchIndices.size() >= reqMatchesForFrameAssoc) {
+                    if (isDebug) std::cout << "Including frame " << revIter->frameId << " in the association (" << pointMatchIndices.size() << " matches)." << std::endl;
+                    tfCloud(myObs.tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, revIter->obs, myObs.obs), *revIter);
                     std::advance(revIter, 1);   // reverse iterators are wierd
                     unassociatedObs.erase(revIter.base());  // iterator "advances" to look at previous value
                 }
@@ -330,6 +330,8 @@ int main(int argc, char **argv) {
     numSideBoundsForMatch = n.param("numSideBoundsForMatch", 3);
     maxKeyframeWidth = n.param("maxKeyframeWidth", 5);
     numSkippedFramesBeforeSend = n.param("numSkippedFramesBeforeSend", 3);
+    reqMatchesForFrameAssoc = n.param("reqMatchesForFrameAssoc", 2);
+    if (reqMatchesForFrameAssoc < 2) reqMatchesForFrameAssoc = 2;
 
     // doubles
     polygonMatchThresh = n.param("polygonMatchThresh", 3.0);

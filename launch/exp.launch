@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+    <arg name="configFile" default="E-c14c.yaml" />
+    <rosparam file="$(find urquhart)/run_configs/experiments/$(arg configFile)" command="load" />
+    <node pkg="urquhart" type="CreateLogs" name="log_setup" output="screen" />
+    
+    <!-- Simulate Robot Observations -->
+    <node pkg="urquhart" type="ultimate_path" name="sim_path" output="screen" />
+
+    <!-- Local Bundle Adjustment Node -->
+    <node pkg="urquhart" type="KeyframeGen" name="keyframe_maker" output="screen" />
+
+    <!-- Global GraphSLAM Node -->
+    <node pkg="urquhart" type="PolygonSLAM" name="graph_builder" output="screen" />
+
+
+
+    <!-- Robot Simulation Visualizations -->
+    <!-- <node pkg="urquhart" type="live_truth_display.py" name="live_true" output="screen" /> -->
+    <group ns="sim_path">
+        <node pkg="urquhart" type="live_pc.py" name="pc_display" output="screen">
+            <param name="topicName" value="local_points" />
+        </node>
+    </group>
+
+    <!-- Local Bundle Adjustment Visualizations -->
+    <group ns="keyframe_maker">
+        <!-- <node pkg="urquhart" type="live_gh.py" name="gh_display" output="screen" /> -->
+        <!-- <node pkg="urquhart" type="live_pc.py" name="baseframe_display" output="screen">
+            <param name="topicName" value="allPoints" />
+        </node> -->
+        <node pkg="urquhart" type="live_pc.py" name="keyframe_display" output="screen">
+            <param name="topicName" value="keyframe" />
+        </node>
+    </group>
+
+    <!-- Global Map Visualizations -->
+    <node pkg="urquhart" type="live_graph.py" name="graph_display" output="screen" />
+</launch>

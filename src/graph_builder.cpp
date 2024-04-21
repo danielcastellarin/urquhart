@@ -324,7 +324,7 @@ struct SLAMGraph {
         return gErr;
     }
 
-    bool optimizeGraph(int ogStateVectorLength, int ogPLEdgeLength, int ogLandmarkCount, const std::vector<int>& initLdmkIdxs, bool isDebug) {
+    bool optimizeGraph(int ogStateVectorLength, int ogPLEdgeLength, int ogLandmarkCount, const std::vector<int>& initLdmkIdxs, bool isDebug, int newGraphErrorThresh) {
         
         // Initialize sparse system H and coefficient vector b with zeroes
         // int currentStateVectorLength = stateVector.size(), stateVectorSpaceAdded = currentStateVectorLength - ogStateVectorLength;
@@ -423,7 +423,8 @@ struct SLAMGraph {
         // int numNewPLEdges = (stateVectorSpaceAdded - 3) >> 1;
         double newPoseError = getErrorFromLastPose(ogPLEdgeLength, poseNodeList.back().stateVectorIdx, dx);
         if (isDebug) std::cout << "This keyframe introduced an error of " << newPoseError << " to the graph." << std::endl;
-        if (newPoseError > 10000) { // TODO figure out how this threshold should be defined
+        if (newPoseError > newGraphErrorThresh) { // TODO figure out how this threshold should be defined
+        // if (newPoseError > 5000) { // TODO figure out how this threshold should be defined
             if (isDebug) {
                 std::cout << "UH OH! Aggregated error exceeds acceptable margins, rolling back graph." << std::endl;
                 std::cout << "-------------------------------------------------------------------" << std::endl;
@@ -521,6 +522,7 @@ Eigen::Matrix3d tfFromSubsetMatches(const Points& localLandmarks, const Points& 
 // ratio of outliers to cause exit (r) = 0.99
 // max iterations (s) = 40000
 using GlobalPt = std::pair<Eigen::Index, PtLoc>;
+int minFilteredAssocForValidKf;
 bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
         const std::vector<std::pair<Eigen::Index, Eigen::Index>>& allMatches,
         std::unordered_map<Eigen::Index, GlobalPt>& acceptedMatches,
@@ -613,7 +615,7 @@ bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
             acceptedMatches = invertedGoodMatchesSoFar;
             bestTf = t2v(tf);
             unmatchedLocals = unmatchedPoints;
-            hasEstimate = true;
+            hasEstimate = invertedGoodMatchesSoFar.size() >= minFilteredAssocForValidKf;
         }
     }
 
@@ -655,7 +657,8 @@ int ransacMaxIter, ransacMatchPrereq, ransacMatchSampleSize;
 double ptAssocThresh;
 int minAssocForNewLdmk, associationWindowSize;
 
-// Rollback storage
+// Rollback parameters and storage
+int newGraphErrorThresh;
 std::unordered_map<PointRef, AssocSet, hash_pair> unresolvedLandmarksCopy;
 bool wasLastFrameRolledBack = false;
 
@@ -991,7 +994,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Optimize the graph once
         if (isConsoleDebug) std::cout << "Beginning graph optimization..." << std::endl;
-        wasLastFrameRolledBack = !g.optimizeGraph(ogStateVectorLength, ogPLEdgeLength, ogLandmarkCount, initLdmkIdxs, isConsoleDebug);
+        wasLastFrameRolledBack = !g.optimizeGraph(ogStateVectorLength, ogPLEdgeLength, ogLandmarkCount, initLdmkIdxs, isConsoleDebug, newGraphErrorThresh);
         if (wasLastFrameRolledBack) {  // TODO what if I did two sequential optimizations here?
             unresolvedLandmarks = unresolvedLandmarksCopy;
             return;
@@ -1148,6 +1151,10 @@ int main(int argc, char **argv) {
     ransacAssocNetThresh *= ransacAssocNetThresh;                       // <-- converting to squared distance
     ransacMatchRatio = n.param("ransacMatchRatio", 1.0);                // percentage [0-1]
     maxSensorRange = n.param("maxSensorRange", 40) * 1.1;
+
+    // Map Update Acceptance parameters
+    newGraphErrorThresh = n.param("newGraphErrorThresh", 10000);
+    minFilteredAssocForValidKf = n.param("minFilteredAssocForValidKf", 2);
 
     // Association Network
     minAssocForNewLdmk = n.param("minAssocForNewLdmk", 5);              // # associations to create a new landmark

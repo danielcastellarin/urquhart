@@ -58,6 +58,7 @@ from matplotlib.patches import ConnectionPatch
 
 
 numFrames = 0
+obsRange = None
 fig=plt.figure()
 topicName = ""
 
@@ -72,6 +73,10 @@ def callback(data: pc2.PointCloud2):
         fig.gca().plot(x, y, 'ro')
         numTrees += 1
 
+    if obsRange is not None:
+        fig.gca().set_xlim(-obsRange, obsRange)
+        fig.gca().set_ylim(-obsRange, obsRange)
+
     # Set title and update figure
     fig.gca().set_title(f"{topicName} | Keyframe ID: {data.header.seq} | Trees: {numTrees}")
     plt.draw()
@@ -82,7 +87,7 @@ def callback(data: pc2.PointCloud2):
 ################
 
 def listener():
-    global topicName
+    global topicName, obsRange
     rospy.init_node('pc_display')
 
     # Get topic of pointcloud to display
@@ -90,6 +95,7 @@ def listener():
     rospy.Subscriber(topicName, pc2.PointCloud2, callback)
 
     fig.canvas.set_window_title(f"Points from {topicName}")
+    obsRange = rospy.get_param("/sim_path/observationRange", None)
 
     # Open figure window until finished
     # plt.ion()
