@@ -531,9 +531,14 @@ bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
 {
     bool hasEstimate = false;
 
-    // Preallocate space to perform matrix operations (can be quite large)
+    // Preallocate space to perform nearest-neighbor operations with matrices (can be quite large)
     Points calcMat(2, globalLandmarks.cols());
     Eigen::VectorXi closebyPointsMask(globalLandmarks.cols());
+
+    // Preallocate space to transform local landmarks into global frame
+    Eigen::Matrix3Xd localInGlobal(3, localLandmarks.cols());
+    localInGlobal << localLandmarks, Eigen::RowVectorXd::Ones(localLandmarks.cols());
+
     
     // Initialize components to randomly sample landmark matches
     std::random_device randomDevice;
@@ -545,7 +550,7 @@ bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
 
     // Loop until we tried too many times or we found the expected number of landmark associations
     int expectedNumMatchedLandmarks = localLandmarks.cols() * matchRatio;
-    for (int i = 0; i < maxIter && acceptedMatches.size() <= expectedNumMatchedLandmarks; ++i) {
+    for (int iter = 0; iter < maxIter && acceptedMatches.size() <= expectedNumMatchedLandmarks; ++iter) {
         std::unordered_map<Eigen::Index, std::pair<Eigen::Index, PtLoc>> invertedGoodMatchesSoFar; // targ --> ref
         std::unordered_set<Eigen::Index> problematicGlobals;
         std::vector<std::pair<Eigen::Index, PtLoc>> unmatchedPoints;
@@ -553,6 +558,10 @@ bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
         // Take random subset of matches to use for calculating the global -> local transform
         std::shuffle(indices.begin(), indices.end(), rng);
         Eigen::Matrix3d tf = tfFromSubsetMatches(localLandmarks, globalLandmarks, allMatches, indices, reqMatchesForTf);
+        
+        // Find the positions of the local landmarks in the global frame
+        if (iter) localInGlobal(Eigen::seq(0,1), Eigen::placeholders::all) = localLandmarks;
+        localInGlobal = tf * localInGlobal;
 
         // Determine which landmarks are "observable" from the given pose
         calcMat = globalLandmarks.colwise() - tf(Eigen::seq(0,1), 2);
@@ -573,14 +582,7 @@ bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
         Eigen::Index closestLandmarkIdx;
         // Match as many points in the keyframe with landmarks in the global frame
         for (int lIdx = 0; lIdx < localLandmarks.cols(); ++lIdx) {
-            // Define this tree's local position as a homogeneous matrix
-            Eigen::Matrix3d localPointTf {
-                {1, 0, localLandmarks(0, lIdx)},
-                {0, 1, localLandmarks(1, lIdx)},
-                {0, 0, 1},
-            };
-            // Obtain the position of this tree in the global frame
-            GlobalPt gp = {lIdx, PtLoc{(tf * localPointTf)(Eigen::seq(0,1), 2)}};
+            GlobalPt gp = {lIdx, PtLoc{localInGlobal(Eigen::seq(0,1), lIdx)}};
 
             // Get the distance to the nearest global landmark (with that landmark's index)
             intMat = closePoints.colwise() - gp.second;
