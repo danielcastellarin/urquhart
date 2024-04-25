@@ -288,7 +288,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // Log keyframe (if desired)
         if (isLogging) {
             std::ofstream kfOut(keyframePath+std::to_string(++numFramesSent)+".txt");
-            for (const auto& kf : kfObs) kfOut << kf.frameId << " ";
+            for (const ObsRecord& kf : kfObs) if (kf.tf.isIdentity()) kfOut << kf.frameId;
             for (const auto& p : outputCloud) kfOut << std::endl << p.x << " " << p.y;
             kfOut.close();
         }

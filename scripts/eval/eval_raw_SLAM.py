@@ -58,7 +58,11 @@ print(f"Analyzing forest at path: {pathToOutput}")
 
 # Get keyframe mappings to associate robot's pose per keyframe
 keyframeFiles = [filename for filename in os.listdir(pathToOutput+"/keyframe") if filename.endswith(".txt")]
-keyframeToObsMap = {int(filename.split(".")[0])-1: int(open(pathToOutput+"/keyframe/"+filename).readline().split(" ")[0]) for filename in keyframeFiles}
+keyframeToObsMap = {int(filename.split(".")[0])-1: int(open(pathToOutput+"/keyframe/"+filename).readline())-1 for filename in keyframeFiles}
+# keyframe ID (from perspective of global map node) -> ground truth observation number
+# Both the filename (for keyframe ID) and first line (for ground truth index) are logged as base-1 when they should be base 0
+
+
 
 # Get ground truth robot poses
 globalPoses = [tuple(map(float, line.strip('\n').split(" ")[:-2])) for line in open(pathToOutput+"/!gp.txt")]
@@ -71,7 +75,6 @@ for kfID, obsID in keyframeToObsMap.items():
     currLocalX, currLocalY, currLocalTheta = localPoses[obsID]
     currLocalX -= locStartX
     currLocalY -= locStartY
-    # finalLocalPoses[kfID] = (currLocalX-locStartX, currLocalY-locStartY, currLocalTheta-locStartTheta)
     finalLocalPoses[kfID] = (currLocalX*locCos - currLocalY*locSin, currLocalX*locSin + currLocalY*locCos, currLocalTheta-locStartTheta)
 
 # for p in finalLocalPoses:

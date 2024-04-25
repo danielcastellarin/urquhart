@@ -78,7 +78,7 @@ def callback(data: pc2.PointCloud2):
         fig.gca().set_ylim(-obsRange, obsRange)
 
     # Set title and update figure
-    fig.gca().set_title(f"{topicName} | Keyframe ID: {data.header.seq} | Trees: {numTrees}")
+    fig.gca().set_title(f"{topicName} | Frame ID: {data.header.seq} | Trees: {numTrees}")
     plt.draw()
     numFrames += 1
 

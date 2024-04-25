@@ -79,8 +79,8 @@ def draw_graph(data: String):
     global graphFrames
     fig.clf()
 
-    # poses | landmark positions | existing ldmk refs | new ldmk refs | previous global error
-    poses, ldmkPos, exLdmkRefs, newLdmkRefs, glError = tuple(data.data.split("|"))
+    # keyframe ID | poses | landmark positions | existing ldmk refs | new ldmk refs | previous global error
+    kfID, poses, ldmkPos, exLdmkRefs, newLdmkRefs, glError = tuple(data.data.split("|"))
 
     # Parse robot poses and landmarks
     poseList = [tuple(map(float, pose.split(" "))) for pose in poses.split(":")]
@@ -111,7 +111,7 @@ def draw_graph(data: String):
     
 
     # Define plot title and draw
-    fig.gca().set_title(f"Frame {len(poseList)} | {len(exLdmkRefs)} Assoc; {len(newLdmkRefs)} New | Existing Error: {glError}")
+    fig.gca().set_title(f"Frame {kfID} | {len(exLdmkRefs)} Assoc; {len(newLdmkRefs)} New | Existing Error: {glError}")
     plt.draw()
 
 

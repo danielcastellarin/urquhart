@@ -101,6 +101,9 @@ struct PPEdge { // Point location derived from matching local shapes with global
         info << 100,  0,   0,
                 0,  100,   0,
                 0,    0, 100;
+        // info << 1, 0, 0,
+        //         0, 1, 0,
+        //         0, 0, 1;
     }
 };
 
@@ -427,7 +430,7 @@ struct SLAMGraph {
         // if (newPoseError > 5000) { // TODO figure out how this threshold should be defined
             if (isDebug) {
                 std::cout << "UH OH! Aggregated error exceeds acceptable margins, rolling back graph." << std::endl;
-                std::cout << "-------------------------------------------------------------------" << std::endl;
+                std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << std::endl;
             }
             // Revert stateVector to original
             stateVector.conservativeResize(ogStateVectorLength);
@@ -543,7 +546,7 @@ bool estimateBestTf(const Points& localLandmarks, const Points& globalLandmarks,
     // Initialize components to randomly sample landmark matches
     std::random_device randomDevice;
     std::mt19937 rng(randomDevice());
-    // rng.seed(10);
+    rng.seed(10);
     std::vector<int> indices(allMatches.size());
     std::iota(indices.begin(), indices.end(), 0);
 
@@ -750,11 +753,13 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // Publish initial graph state for visualization
         if (isRealtimeVis) {
             std::stringstream graphStream;
+
+            // Keyframe ID
+            graphStream << cloudMsg->header.seq << "|";
             
             // Initial Pose
-            graphStream << g.poseNodeList[0].pose(0) << " " << g.poseNodeList[0].pose(1) << " " << g.poseNodeList[0].pose(2);
+            graphStream << g.poseNodeList[0].pose(0) << " " << g.poseNodeList[0].pose(1) << " " << g.poseNodeList[0].pose(2) << "|";
 
-            graphStream << "|";
             int tmpIdx = 0;     // Landmark Positions
             for (const PtLoc& ldmk : g.geoHier->landmarks.colwise()) graphStream << (tmpIdx++!=0 ? ":": "") << ldmk(0) << " " << ldmk(1);
 
@@ -799,6 +804,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // Exit early if we couldn't find matches within a reasonable amount of time
         if (matchingPointIndices.size() < ransacMatchPrereq) {
             if (isConsoleDebug) std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because no matches could be found." << std::endl;
+            if (isConsoleDebug) std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << std::endl;
             return;
         }
 
@@ -835,6 +841,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                             ransacMatchRatio,
                             maxSensorRange)) {
             if (isConsoleDebug) std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because all potential matches could not be verified." << std::endl;
+            if (isConsoleDebug) std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << std::endl;
             return;
         }
 
@@ -880,60 +887,102 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
             // std::cout << "Processing PF: {"<< g.poseNodeList.size() << "," << ldmkRefIdx <<"}" << std::endl;
             PointRef pf = {g.poseNodeList.size(), ldmkRefIdx++}; // {"frameID", ldmkIdx}
-            AssocSet newAssociations;
+            // AssocSet newAssociations;
             
-            // std::cout << "Current keyframePoints:\n" << keyframePoints << std::endl;
+            // // std::cout << "Current keyframePoints:\n" << keyframePoints << std::endl;
 
+            // // Attempt to associate the "Tree" with every point from previous observations in the active window
+            // for (auto& [observedTreeRef, associatedTreeRefs] : unresolvedLandmarks) {
+            //     if (observedTreeRef.first == pf.first) continue;    // Do not associate points in the same frame
+
+            //     // std::cout << "Associating with {"<< observedTreeRef.first << "," << observedTreeRef.second <<"}, ";
+            //     // std::cout << "whose position is "<< activeObsWindow[observedTreeRef.first].col(observedTreeRef.second).transpose();
+
+            //     // Using max feature distance instead of euclidean distance for increased speed
+            //     if (((activeObsWindow[observedTreeRef.first].col(observedTreeRef.second) - keyframePoints.col(pf.second)).array().abs() < ptAssocThresh).all()) {
+            //         associatedTreeRefs.insert(pf);
+            //         newAssociations.insert(observedTreeRef);
+            //         // std::cout << "      YES";
+            //     }
+            //     // std::cout << std::endl;
+            // }
+
+            // // std::cout << "===================================================" << std::endl;
+            // // std::cout << "Associated with " << newAssociations.size() << " points from previous frames." << std::endl;
+
+            // // Check if the newly-observed tree has enough associated observations to establish a new landmark
+            // newAssociations.insert(pf);
+            // AssocSet maxSubset = newAssociations;
+            // AssocSet::iterator itr = maxSubset.begin();
+            // bool isLandmarkDefined = false;
+
+            // while (maxSubset.size() >= minAssocForNewLdmk && !isLandmarkDefined) {
+            //     if (canFormKClique(unresolvedLandmarks[*itr], maxSubset, minAssocForNewLdmk)) {
+            //         // if the iterator reaches the end of this new tree's association set, 
+            //         // then all remaining points in the set should form a k-clique - satisfying the condition to make a landmark
+            //         isLandmarkDefined = ++itr == maxSubset.end();
+            //     } else {
+            //         maxSubset.erase(itr);       // Remove any elements cannot compose a k-clique with the new point
+            //         itr = maxSubset.begin();    // Double-check any elements that have already been processed
+            //     }
+            // }
+            // unresolvedLandmarks[pf] = newAssociations;
+
+            // // Collapse the observations into a single landmark if k-CLIQUE is present
+            // if (isLandmarkDefined) {
+            //     PtLoc establishedLdmk = Eigen::Vector2d::Zero();
+            //     // Delete all references to the trees that are about to become a landmark
+            //     // Average out the position of the landmark
+            //     for (const PointRef& essentialTree : maxSubset) {
+            //         deleteTreeAssoc(unresolvedLandmarks, essentialTree);
+            //         establishedLdmk += (essentialTree.first == g.poseNodeList.size() ? keyframePoints : activeObsWindow[essentialTree.first]).col(essentialTree.second);
+            //     } 
+            //     newlyEstablishedLandmarkObservations.push_back({establishedLdmk / maxSubset.size(), maxSubset});
+            //     if (isConsoleDebug) std::cout << "NEW LANDMARK ESTABLISHED AT " << (establishedLdmk / maxSubset.size()).transpose() << std::endl;
+            // }
+
+            AssocSet neighbors, clique({pf});
+            std::unordered_map<PointRef, int, hash_pair> neighborTally;
             // Attempt to associate the "Tree" with every point from previous observations in the active window
             for (auto& [observedTreeRef, associatedTreeRefs] : unresolvedLandmarks) {
                 if (observedTreeRef.first == pf.first) continue;    // Do not associate points in the same frame
 
-                // std::cout << "Associating with {"<< observedTreeRef.first << "," << observedTreeRef.second <<"}, ";
-                // std::cout << "whose position is "<< activeObsWindow[observedTreeRef.first].col(observedTreeRef.second).transpose();
-
                 // Using max feature distance instead of euclidean distance for increased speed
                 if (((activeObsWindow[observedTreeRef.first].col(observedTreeRef.second) - keyframePoints.col(pf.second)).array().abs() < ptAssocThresh).all()) {
+                    int count = 2; // link to new node plus one (for easier comparison with k)
+                    for (const auto& n : neighbors) {
+                        if (unresolvedLandmarks[observedTreeRef].find(n) != unresolvedLandmarks[observedTreeRef].end()) {
+                            ++count;
+                            if (++neighborTally[n] >= minAssocForNewLdmk) clique.insert(n);
+                        }
+                    }
+                    neighborTally[observedTreeRef] = count;
+                    if (count >= minAssocForNewLdmk) clique.insert(observedTreeRef);
+                    
                     associatedTreeRefs.insert(pf);
-                    newAssociations.insert(observedTreeRef);
-                    // std::cout << "      YES";
-                }
-                // std::cout << std::endl;
-            }
-
-            // std::cout << "===================================================" << std::endl;
-            // std::cout << "Associated with " << newAssociations.size() << " points from previous frames." << std::endl;
-
-            // Check if the newly-observed tree has enough associated observations to establish a new landmark
-            newAssociations.insert(pf);
-            AssocSet maxSubset = newAssociations;
-            AssocSet::iterator itr = maxSubset.begin();
-            bool isLandmarkDefined = false;
-
-            while (maxSubset.size() >= minAssocForNewLdmk && !isLandmarkDefined) {
-                if (canFormKClique(unresolvedLandmarks[*itr], maxSubset, minAssocForNewLdmk)) {
-                    // if the iterator reaches the end of this new tree's association set, 
-                    // then all remaining points in the set should form a k-clique - satisfying the condition to make a landmark
-                    isLandmarkDefined = ++itr == maxSubset.end();
-                } else {
-                    maxSubset.erase(itr);       // Remove any elements cannot compose a k-clique with the new point
-                    itr = maxSubset.begin();    // Double-check any elements that have already been processed
+                    neighbors.insert(observedTreeRef);
                 }
             }
-            unresolvedLandmarks[pf] = newAssociations;
+            unresolvedLandmarks[pf] = neighbors;
 
             // Collapse the observations into a single landmark if k-CLIQUE is present
-            if (isLandmarkDefined) {
+            if (clique.size() >= minAssocForNewLdmk) {
                 PtLoc establishedLdmk = Eigen::Vector2d::Zero();
                 // Delete all references to the trees that are about to become a landmark
                 // Average out the position of the landmark
-                for (const PointRef& essentialTree : maxSubset) {
-                    deleteTreeAssoc(unresolvedLandmarks, essentialTree);
+                for (const PointRef& essentialTree : clique) {
+                    // for (const PointRef& neighbor : unresolvedLandmarks[essentialTree]) if (clique.find(neighbor) == clique.end()) unresolvedLandmarks[neighbor].erase(essentialTree);
+                    for (const PointRef& neighbor : unresolvedLandmarks[essentialTree]) unresolvedLandmarks[neighbor].erase(essentialTree);
+                    unresolvedLandmarks.erase(essentialTree);
+
+                    // read landmark position value from keyframe or from sliding window
                     establishedLdmk += (essentialTree.first == g.poseNodeList.size() ? keyframePoints : activeObsWindow[essentialTree.first]).col(essentialTree.second);
                 } 
-                newlyEstablishedLandmarkObservations.push_back({establishedLdmk / maxSubset.size(), maxSubset});
-                if (isConsoleDebug) std::cout << "NEW LANDMARK ESTABLISHED AT " << (establishedLdmk / maxSubset.size()).transpose() << std::endl;
+                newlyEstablishedLandmarkObservations.push_back({establishedLdmk / clique.size(), clique});
+                if (isConsoleDebug) std::cout << "NEW LANDMARK ESTABLISHED AT " << newlyEstablishedLandmarkObservations.back().first.transpose() << std::endl;
             }
         }
+        activeObsWindow[g.poseNodeList.size()] = keyframePoints;
 
 
         // %%%%%%%%%%%%%%%%
@@ -971,6 +1020,9 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             // Publish graph state before optimization
             std::stringstream graphStream;
 
+            // Keyframe ID
+            graphStream << cloudMsg->header.seq << "|";
+
             int tmpIdx = 0; // Poses
             for (const auto& pn : g.poseNodeList) graphStream << (tmpIdx++!=0 ? ":": "") << pn.pose(0) << " " << pn.pose(1) << " " << pn.pose(2);
 
@@ -999,6 +1051,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         wasLastFrameRolledBack = !g.optimizeGraph(ogStateVectorLength, ogPLEdgeLength, ogLandmarkCount, initLdmkIdxs, isConsoleDebug, newGraphErrorThresh);
         if (wasLastFrameRolledBack) {  // TODO what if I did two sequential optimizations here?
             unresolvedLandmarks = unresolvedLandmarksCopy;
+            activeObsWindow.erase(g.poseNodeList.size()); // last pose node has already been popped from list
             return;
         }
         if (isConsoleDebug) {
@@ -1022,7 +1075,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         }
 
         // Store the positions of this keyframe's unassociated points
-        activeObsWindow[g.poseNodeList.size()-1] = keyframePoints;
+        // activeObsWindow[g.poseNodeList.size()-1] = keyframePoints;
         if (activeObsWindow.size() == associationWindowSize) {
             // Erase every unresolved tree position from the oldest observation in our window, skipping any that already became landmarks
             int frameID = activeObsWindow.begin()->first;
