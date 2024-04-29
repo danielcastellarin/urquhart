@@ -25,7 +25,7 @@ struct ObsRecord {
     int frameId;
     urquhart::Observation obs;
     pcl::PointCloud<pcl::PointXY> cloud;
-    Eigen::Matrix4d tf = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d tf;
     ObsRecord(int id, Points pv, pcl::PointCloud<pcl::PointXY> pc) : frameId(id), obs(pv), cloud(pc) {}
     bool operator==(const ObsRecord &other) const{ return frameId == other.frameId; }
     bool operator<(const ObsRecord &other) const{ return frameId < other.frameId; }
@@ -34,9 +34,8 @@ struct ObsRecord {
 pcl::PointCloud<pcl::PointXYZ>::Ptr bigPcPtr(new pcl::PointCloud<pcl::PointXYZ>());
 ros::Publisher kfpub, bigCloudPub, hierPub;
 
-// std::vector<ObsRecord> unassociatedObs;
-// std::set<ObsRecord> kfObs;
-std::set<ObsRecord> kfObs, unassociatedObs;
+std::vector<ObsRecord> unassociatedObs;
+std::set<ObsRecord> kfObs;
 int maxKeyframeWidth, numSkippedFramesBeforeSend, numSideBoundsForMatch, reqMatchesForFrameAssoc;
 double polygonMatchThresh, reqMatchedPolygonRatio, validPointMatchThresh, clusterTolerance;
 bool isDebug, isIndivFramePub, pubAllPoints, isLogging;
@@ -101,7 +100,7 @@ std::vector<std::pair<Eigen::Index, Eigen::Index>> matchObsIdx(const urquhart::O
     return finalVertexMatches;
 }
 
-void tfCloud(Eigen::Matrix4d existingTfToBase, Eigen::Matrix4d refToTargTf, ObsRecord obsRec) {
+void tfCloud(Eigen::Matrix4d existingTfToBase, Eigen::Matrix4d refToTargTf, ObsRecord& obsRec) {
     Eigen::Matrix4d fullTfToBase = refToTargTf * existingTfToBase;
     // Temporarily convert the pointcloud to 3D to transform into base frame 
     pcl::PointCloud<pcl::PointXYZ> nonAssociatedCloud, newlyAssociatedCloud;
@@ -126,36 +125,66 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     for (const auto& p : localCloud) vectorOfTrees.col(idx++) = PtLoc{p.x, p.y};
     ObsRecord myObs(cloudMsg->header.seq, vectorOfTrees, localCloud);
 
-    std::vector<std::pair<Eigen::Index, Eigen::Index>> pointMatchIndices;
-    bool noKf = kfObs.empty(), notMatched = true;
-    if (isDebug) {
-        if (noKf) std::cout << "Trying to find base frame for frame " << myObs.frameId << std::endl;
-        else std::cout << "Matching frame " << myObs.frameId << " with associated clouds." << std::endl;
-    }
+    // Try to match the current frame with any that have been associated with a base frame
+    if (!kfObs.empty()) {
+        std::vector<std::pair<Eigen::Index, Eigen::Index>> pointMatchIndices;
+        if (isDebug) std::cout << "Matching frame " << myObs.frameId << " with associated clouds." << std::endl;
+        
+        // Match (current frame --> associated frame) until match found
+        auto revKfIter = kfObs.rbegin();
+        do {
+            pointMatchIndices = matchObsIdx(myObs.obs, revKfIter->obs, polygonMatchThresh, validPointMatchThresh);
+        } while (pointMatchIndices.size() < reqMatchesForFrameAssoc && ++revKfIter != kfObs.rend());
 
-
-    auto revIter = (noKf ? unassociatedObs.rbegin() : kfObs.rbegin());
-    auto endIter = (noKf ? unassociatedObs.rend() : kfObs.rend());
-    while (notMatched && revIter != endIter) {
-        pointMatchIndices = matchObsIdx(myObs.obs, revIter->obs, polygonMatchThresh, validPointMatchThresh);
+        // Store observation data
         if (pointMatchIndices.size() < reqMatchesForFrameAssoc) {
-            notMatched = false;
-            // Assign the target frame of this match as the base of the keyframe
-            if (noKf) {
-                pcl::copyPointCloud(revIter->cloud, *bigPcPtr);
-                kfObs.insert(*revIter);
-                if (isDebug) std::cout << "Established frame " << revIter->frameId << " as base of keyframe." << std::endl;
-            } else 
-            if (isDebug) std::cout << "Found " << pointMatchIndices.size() << " matches with frame " << revIter->frameId << ", associating..." << std::endl;
-            Eigen::Matrix4d intTF = computeRigid2DEuclidTfFromIndices(pointMatchIndices, myObs.obs, revIter->obs);
-            if (isDebug) std::cout << "Estimated TF:" << std::endl << intTF << std::endl;
-            tfCloud(revIter->tf, intTF, myObs);
+            unassociatedObs.push_back(myObs);
+            if (isDebug) std::cout << "No matches found." << std::endl;
+        } else {
+            // Estimate tf from reference to target frame (assuming we have gotten rid of outliers already)
+            if (isDebug) std::cout << "Found " << pointMatchIndices.size() << " matches with frame " << revKfIter->frameId << ", associating..." << std::endl;
+            tfCloud(revKfIter->tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, myObs.obs, revKfIter->obs), myObs);
 
-            // Set the iterator to the first unassociated observation we have not evaluated yet
-            if (noKf) {
-                std::advance(revIter, 1);
-                unassociatedObs.erase(revIter.base());
-            } else revIter = unassociatedObs.rbegin();
+            // Try to match all unassociated observations with the current observation
+            auto obsIter = unassociatedObs.begin();
+            while (obsIter != unassociatedObs.end()) {
+                pointMatchIndices = matchObsIdx(obsIter->obs, myObs.obs, polygonMatchThresh, validPointMatchThresh);
+                if (pointMatchIndices.size() >= reqMatchesForFrameAssoc) {
+                    if (isDebug) std::cout << "Also matched with frame " << obsIter->frameId << std::endl;
+                    tfCloud(myObs.tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, obsIter->obs, myObs.obs), *obsIter);
+                    obsIter = unassociatedObs.erase(obsIter);
+                }
+                else ++obsIter;
+            }
+        }
+
+    } else if (!unassociatedObs.empty()) {  // Try to match the current frame with any unassociated frames
+        std::vector<std::pair<Eigen::Index, Eigen::Index>> pointMatchIndices;
+        if (isDebug) std::cout << "Trying to find base frame for frame " << myObs.frameId << std::endl;
+
+        // Match (current frame --> latest unassociated frame) until match found
+        auto revIter = unassociatedObs.rbegin();
+        do {
+            pointMatchIndices = matchObsIdx(myObs.obs, revIter->obs, polygonMatchThresh, validPointMatchThresh);
+        } while (pointMatchIndices.size() < reqMatchesForFrameAssoc && ++revIter != unassociatedObs.rend());
+
+        // Store observation data
+        if (pointMatchIndices.size() < reqMatchesForFrameAssoc) {
+            unassociatedObs.push_back(myObs);
+            if (isDebug) std::cout << "None found." << std::endl;
+        } else {
+            // Assign the target frame of this match as the base of the keyframe
+            revIter->tf = Eigen::Matrix4d::Identity();
+            pcl::copyPointCloud(revIter->cloud, *bigPcPtr);
+            kfObs.insert(*revIter);
+
+            // Estimate tf from reference to target frame (assuming we have gotten rid of outliers already)
+            if (isDebug) std::cout << "With " << pointMatchIndices.size() << " matches, base frame " << revIter->frameId << " established; adding frame " << myObs.frameId << " behind it." << std::endl;
+            tfCloud(revIter->tf, computeRigid2DEuclidTfFromIndices(pointMatchIndices, myObs.obs, revIter->obs), myObs);
+            
+            // Remove the base frame from the unassociated list and advance the iterator
+            std::advance(revIter, 1);
+            unassociatedObs.erase(revIter.base());
 
             // For every remaining unassociated observation, try to match with the current observation
             while (revIter != unassociatedObs.rend()) {
@@ -169,11 +198,10 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                 else ++revIter;
             }
         }
-        ++revIter;
-    }
-    if (notMatched) {
-        unassociatedObs.insert(myObs);
-        if (isDebug) std::cout << "No matches found." << std::endl;
+    } else {
+        // If this is the first observation, add it to the unassociated ones
+        unassociatedObs.push_back(myObs);
+        if (isDebug) std::cout << "Initializing unassociated observations at frame " << myObs.frameId << std::endl;
     }
 
     // Publish geometric hierarchy for the input frame (if desired)
@@ -274,8 +302,8 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     }
 
     // If an unassociated frame becomes too old before it can be associated, remove it
-    if (!unassociatedObs.empty() && unassociatedObs.begin()->frameId + numSkippedFramesBeforeSend <= cloudMsg->header.seq) {
-        if (isDebug) std::cout << "Deleting frame " << unassociatedObs.begin()->frameId << " from unassociated observations." << std::endl;
+    if (!unassociatedObs.empty() && unassociatedObs.front().frameId + numSkippedFramesBeforeSend <= cloudMsg->header.seq) {
+        if (isDebug) std::cout << "Deleting frame " << unassociatedObs.front().frameId << " from unassociated observations." << std::endl;
         unassociatedObs.erase(unassociatedObs.begin());
     }
     if (isDebug) std::cout << "===============================================================" << std::endl;
