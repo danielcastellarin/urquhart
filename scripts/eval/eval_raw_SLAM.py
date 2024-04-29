@@ -58,7 +58,15 @@ print(f"Analyzing forest at path: {pathToOutput}")
 
 # Get keyframe mappings to associate robot's pose per keyframe
 keyframeFiles = [filename for filename in os.listdir(pathToOutput+"/keyframe") if filename.endswith(".txt")]
-keyframeToObsMap = {int(filename.split(".")[0])-1: int(open(pathToOutput+"/keyframe/"+filename).readline())-1 for filename in keyframeFiles}
+droppedKeyframes = set(int(fID.strip('\n')) for fID in open(pathToOutput+"/global/!droppedKeyframes.txt") if fID.strip('\n').isdigit()) if os.path.isfile(pathToOutput+"/global/!droppedKeyframes.txt") else set()
+keyframeToObsList = len(keyframeFiles)*[None]
+for filename in keyframeFiles:
+    keyframeID = int(filename.split(".")[0])-1
+    if keyframeID not in droppedKeyframes:
+        keyframeToObsList[keyframeID] = int(open(pathToOutput+"/keyframe/"+filename).readline())
+    else:
+        print(f"dropping observation mapped to keyframe {keyframeID}")
+keyframeToObs = [id for id in keyframeToObsList if id is not None]
 # keyframe ID (from perspective of global map node) -> ground truth observation number
 # Both the filename (for keyframe ID) and first line (for ground truth index) are logged as base-1 when they should be base 0
 
@@ -66,16 +74,16 @@ keyframeToObsMap = {int(filename.split(".")[0])-1: int(open(pathToOutput+"/keyfr
 
 # Get ground truth robot poses
 globalPoses = [tuple(map(float, line.strip('\n').split(" ")[:-2])) for line in open(pathToOutput+"/!gp.txt")]
-startX,startY,startTheta = globalPoses[keyframeToObsMap[0]]
+startX,startY,startTheta = globalPoses[keyframeToObs[0]]
 localPoses = [tuple(map(float, line.strip('\n').split(" ")[:-2])) for line in open(pathToOutput+"/!odom.txt")]
-locStartX,locStartY,locStartTheta = localPoses[keyframeToObsMap[0]]
+locStartX,locStartY,locStartTheta = localPoses[keyframeToObs[0]]
 locSin, locCos = math.sin(-locStartTheta), math.cos(locStartTheta)
-finalLocalPoses = len(keyframeToObsMap)*[None]
-for kfID, obsID in keyframeToObsMap.items():
+finalLocalPoses = []
+for obsID in keyframeToObs:
     currLocalX, currLocalY, currLocalTheta = localPoses[obsID]
     currLocalX -= locStartX
     currLocalY -= locStartY
-    finalLocalPoses[kfID] = (currLocalX*locCos - currLocalY*locSin, currLocalX*locSin + currLocalY*locCos, currLocalTheta-locStartTheta)
+    finalLocalPoses.append((currLocalX*locCos - currLocalY*locSin, currLocalX*locSin + currLocalY*locCos, currLocalTheta-locStartTheta))
 
 # for p in finalLocalPoses:
 #     print(p)
@@ -101,7 +109,6 @@ for x,y in set(ldmk for i in range(len(globalObs)) for ldmk in globalObs[i]):
 graphFiles = [filename for filename in os.listdir(pathToOutput+"/global/graph_nodes") if filename.endswith(".txt")]
 graphInstanceErrors = len(graphFiles)*[None]
 TWOPI = 2*math.pi
-biggest = 0
 # Per keyframe processed, I want to know the historical error in the robot's pose and the summed error of landmark positions that have been discovered
 for filename in graphFiles:
     
@@ -112,15 +119,11 @@ for filename in graphFiles:
     # Find error in each robot pose so far 
     poseErrors = []
     for i, (pX,pY,pT) in enumerate(poseNodes):
-        # gtX, gtY, gtTheta = localPoses[keyframeToObsMap[i]]
         gtX, gtY, gtTheta = finalLocalPoses[i]
-        # if not i: print(pX,pY,pT, gtX, gtY, gtTheta)
         xDiff, yDiff = pX - gtX, pY - gtY
         normDeg = (pT - gtTheta) % TWOPI
         # Euclidean distance b/w positions and absolute difference between angles
         poseErrors.append((math.sqrt(xDiff*xDiff + yDiff*yDiff), min(TWOPI-normDeg, normDeg)))
-
-    if i > biggest: biggest = i
 
     # Find distance to closest ground truth landmarks to what is on the map
     closestLdmksToMap = []

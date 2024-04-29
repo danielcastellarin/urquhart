@@ -57,6 +57,12 @@ void writeHierarchyFiles(const urquhart::Observation& trees, std::string filePat
     dscOut.close();
 }
 
+void logDroppedFrame(std::string filePath, int keyframeID) {
+    std::ofstream dropOut(filePath+"/!droppedKeyframes.txt", std::ios_base::app);
+    dropOut << keyframeID << std::endl;
+    dropOut.close();
+}
+
 Eigen::Matrix3d v2t(Eigen::Vector3d vec) {
     double c = cos(vec(2)), s = sin(vec(2));
     return Eigen::Matrix3d {
@@ -803,8 +809,11 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
         // Exit early if we couldn't find matches within a reasonable amount of time
         if (matchingPointIndices.size() < ransacMatchPrereq) {
-            if (isConsoleDebug) std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because no matches could be found." << std::endl;
-            if (isConsoleDebug) std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << std::endl;
+            if (isConsoleDebug){
+                std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because no matches could be found." << std::endl;
+                std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << std::endl;
+            }
+            if (isLogging) logDroppedFrame(outputPath+"/global", cloudMsg->header.seq);
             return;
         }
 
@@ -840,8 +849,11 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                             ransacAssocNetThresh,
                             ransacMatchRatio,
                             maxSensorRange)) {
-            if (isConsoleDebug) std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because all potential matches could not be verified." << std::endl;
-            if (isConsoleDebug) std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << std::endl;
+            if (isConsoleDebug) {
+                std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because all potential matches could not be verified." << std::endl;
+                std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << std::endl;
+            }
+            if (isLogging) logDroppedFrame(outputPath+"/global", cloudMsg->header.seq);
             return;
         }
 
@@ -1052,6 +1064,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         if (wasLastFrameRolledBack) {  // TODO what if I did two sequential optimizations here?
             unresolvedLandmarks = unresolvedLandmarksCopy;
             activeObsWindow.erase(g.poseNodeList.size()); // last pose node has already been popped from list
+            if (isLogging) logDroppedFrame(outputPath+"/global", cloudMsg->header.seq);
             return;
         }
         if (isConsoleDebug) {
