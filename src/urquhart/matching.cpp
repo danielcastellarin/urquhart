@@ -38,6 +38,46 @@ std::vector<std::pair<Eigen::Index, Eigen::Index>> nonGreedyHierarchyIndexMatchi
     return pointIndexMatching(ref, targ, triangleMatches);
 }
 
+bool nonGreedyMultiThreshHierarchyIndexMatching(const urquhart::Observation &ref, const urquhart::Observation &targ,
+                                                double& thresh, double threshIncrement, double threshLimit, 
+                                                int numSideBoundsForMatch, double reqMatchedPolygonRatio, int minExpectedPointMatches,
+                                                std::vector<std::pair<Eigen::Index, Eigen::Index>>& pointMatches)
+{
+    std::map<double, int> polygonMatchDistances;
+    std::vector<std::pair<size_t, size_t>> polygonMatches, triangleMatches;
+    std::set<size_t> uniquePointMatches;
+
+    // Polygon Matching (Level 2)
+    bestPolygonMatches(ref, ref.hier->getChildrenIds(0), targ, targ.hier->getChildrenIds(0), numSideBoundsForMatch, polygonMatchDistances, polygonMatches);
+
+    // TODO maybe separate triangle descriptor thresh
+
+    // TODO maybe only need to do matching for nearest children of polygons which were above the thresh
+    // auto iter = polygonMatchDistances.begin();
+    do {
+        auto iter = polygonMatchDistances.begin();
+        // Triangle Matching (Level 1)
+        while (iter->first < thresh) {
+            auto [refPoly, targPoly] = polygonMatches[iter->second];
+            nonGreedyPolygonMatching(ref, ref.hier->getChildrenIds(refPoly), targ, targ.hier->getChildrenIds(targPoly), thresh, numSideBoundsForMatch, reqMatchedPolygonRatio, triangleMatches);
+            ++iter;
+        }
+
+        // Vertex Matching (Level 0)
+        pointIndexMatching(ref, targ, triangleMatches, pointMatches, uniquePointMatches);
+
+        if (pointMatches.size() >= minExpectedPointMatches) return true;
+        else {
+            thresh += threshIncrement;
+            triangleMatches.clear();
+            pointMatches.clear();
+        }
+    } while (thresh <= threshLimit);
+    
+    return false;
+}
+
+
 void polygonMatching(
         const urquhart::Observation &ref, std::unordered_set<int> refIds,
         const urquhart::Observation &targ, std::unordered_set<int> targIds,
@@ -110,20 +150,71 @@ void nonGreedyPolygonMatching(
     }
 
     // Add all pairs from the target polygon's perspective
-    for (const auto& [tIdx, closestRef] : targetsClosestDist)
-        polygonMatches.push_back({closestRef.second, tIdx});
+    // for (const auto& [tIdx, closestRef] : targetsClosestDist)
+    //     polygonMatches.push_back({closestRef.second, tIdx});
 
-    // For any pair that the reference disagrees with, add the next closest match (if possible)
-    // for (const auto& [rIdx, closebyTargets] : refClosestTargets) {
-    //     for (auto targIter = closebyTargets.begin(); targIter != closebyTargets.end() && )
-    //     if (targIter->second)
-    // }
-    // ^^^^^ unnecessary
+    // TODO: instead of above, Add all pairs from the reference polygons' perspective
+    for (const auto& [rIdx, closestTargets] : refClosestTargets) {
+        // Ensure the reference and target polygons agree on their match
+        if (targetsClosestDist[closestTargets.begin()->second].second == rIdx){
+            polygonMatches.push_back({rIdx, closestTargets.begin()->second});
+        }
+    }
 
     // Invalidate these matches if not enough of them were made
     if (polygonMatches.size() - numExistingMatches < reqMatchedPolygonRatio * refIds.size()) polygonMatches.resize(numExistingMatches);
 }
 
+
+void bestPolygonMatches(
+        const urquhart::Observation &ref, std::unordered_set<int> refIds,
+        const urquhart::Observation &targ, std::unordered_set<int> targIds,
+        int numSideBoundsForMatch,
+        std::map<double, int> &polygonMatchDistances,
+        std::vector<std::pair<size_t, size_t>> &polygonMatches)
+{
+    double distancePlaceholder;
+
+    std::unordered_map<size_t, std::pair<double, size_t>> targetsClosestDist;
+    std::unordered_map<size_t, std::map<double, size_t>> refClosestTargets;
+
+    // For each reference Polygon, find its distance to each Polygon in the target set
+    for (const auto& rIdx : refIds) {
+        urquhart::Polygon rp = ref.hier->getPolygon(rIdx);
+
+        for (const auto& tIdx : targIds) {
+            urquhart::Polygon tp = targ.hier->getPolygon(tIdx);
+
+            // Record match if target is the closest polygon under the threshold
+            distancePlaceholder = std::abs(rp.n - tp.n) <= numSideBoundsForMatch ? descriptorDistance(rp.descriptor, tp.descriptor) : -1;
+
+            if (distancePlaceholder != -1) {
+                refClosestTargets[rIdx].insert({distancePlaceholder, tIdx});
+                if (targetsClosestDist.find(tIdx) == targetsClosestDist.end() || distancePlaceholder < targetsClosestDist[tIdx].first)
+                    targetsClosestDist[tIdx] = {distancePlaceholder, rIdx};
+            }
+        }
+    }
+
+    // Add all pairs from the target polygon's perspective
+    // for (const auto& [tIdx, closestRef] : targetsClosestDist) {
+    //     // ensure the reference and target polygons agree on their match
+    //     if (refClosestTargets[closestRef.second].begin()->second == tIdx)
+    //         polygonMatches.push_back({closestRef.second, tIdx});
+    // }
+
+    // Add all pairs from the reference polygons' perspective
+    for (const auto& [rIdx, closestTargets] : refClosestTargets) {
+        // Ensure the reference and target polygons agree on their match
+        if (targetsClosestDist[closestTargets.begin()->second].second == rIdx){
+            polygonMatchDistances[closestTargets.begin()->first] = polygonMatches.size();
+            polygonMatches.push_back({rIdx, closestTargets.begin()->second});
+        }
+    }
+
+    // TODO also return the distances for each closest match
+
+}
 
 // void nonGreedyPolygonMatching(
 //         const urquhart::Observation &ref, std::unordered_set<int> refIds,
@@ -216,6 +307,47 @@ std::vector<std::pair<Eigen::Index, Eigen::Index>> pointIndexMatching(const urqu
         }
     }
     return vertexMatches;
+}
+
+void pointIndexMatching(const urquhart::Observation &ref, const urquhart::Observation &targ, const std::vector<std::pair<size_t, size_t>> &triangleMatches, std::vector<std::pair<Eigen::Index, Eigen::Index>> &pointMatches, std::set<size_t> &uniqueMatches)
+{
+    Eigen::PermutationMatrix<3, 3> chi(Eigen::Vector3i{0,1,2});
+    Eigen::Matrix<int, 3, 6> perms;
+    perms << 0, 0, 1, 1, 2, 2,
+             1, 2, 2, 0, 1, 0,
+             2, 1, 0, 2, 0, 1;
+
+    // At this point, we assume that all given triangle matches are probably correct, so we want to match up their vertices
+    for (const auto& [refIdx, targIdx] : triangleMatches) {
+        urquhart::Polygon refTriangle = ref.hier->getPolygon(refIdx), targTriangle = targ.hier->getPolygon(targIdx);
+
+
+        double bestDist = 1000000;
+        Eigen::Vector3i bestPermutation;
+
+        // Try all six permutations of the edge lengths to determine the best match between vertices
+        for (int c = 0; c < 6; ++c) {
+            chi.indices() = perms.col(c);
+            double d = descriptorDistanceAgain(ref.triangulationEdgeLengths(refTriangle.edgeRefs), targ.triangulationEdgeLengths(targTriangle.edgeRefs.transpose() * chi));
+            if (d < bestDist) {
+                bestDist = d;
+                bestPermutation = chi.indices();
+            }
+        }
+
+        // Associate the off-edge vertices for each matched edge 
+        for (int i = 0; i < 3; ++i) {
+            // TODO is there a cleaner way to do this besides clunky indexing? (foreach instead?)
+            Eigen::Index refIdx = (i+2)%3, targIdx = (bestPermutation(i)+2)%3;
+
+            // Only add unique vertex matches to our set
+            size_t uid = cantorPairing(refTriangle.landmarkRefs(refIdx), targTriangle.landmarkRefs(targIdx));
+            if (uniqueMatches.find(uid) == uniqueMatches.end()) {
+                pointMatches.push_back({refTriangle.landmarkRefs(refIdx), targTriangle.landmarkRefs(targIdx)});
+                uniqueMatches.insert(uid);
+            }
+        }
+    }
 }
 
 
