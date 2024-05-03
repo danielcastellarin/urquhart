@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+    <!-- <arg name="configFile" default="E-c34.yaml" /> -->
+    <rosparam file="$(find urquhart)/run_configs/super_exp/10-diff.yaml" command="load" />
+    
+    <!-- Simulate Robot Observations -->
+    <node pkg="urquhart" type="SimPath" name="sim_path" output="screen" />
+
+    <!-- Local Bundle Adjustment Node -->
+    <node pkg="urquhart" type="KeyframeGen" name="keyframe_maker" output="screen" />
+
+    <!-- Global GraphSLAM Node -->
+    <!-- <node pkg="urquhart" type="PolygonSLAM" name="graph_builder" output="screen" /> -->
+
+</launch>

@@ -7,6 +7,8 @@
 #include <map>
 #include <algorithm>
 #include <filesystem>
+#include <chrono>
+
 
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
@@ -32,14 +34,14 @@ struct ObsRecord {
 };
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr bigPcPtr(new pcl::PointCloud<pcl::PointXYZ>());
-ros::Publisher kfpub, bigCloudPub, hierPub;
+ros::Publisher kfpub, bigCloudPub, hierPub, donePub;
 
 std::vector<ObsRecord> unassociatedObs;
 std::set<ObsRecord> kfObs;
 int maxKeyframeWidth, numSkippedFramesBeforeSend, numSideBoundsForMatch, reqMatchesForFrameAssoc;
 double polygonMatchThresh, reqMatchedPolygonRatio, validPointMatchThresh, clusterTolerance;
-bool isDebug, isIndivFramePub, pubAllPoints, isLogging;
-std::string keyframePath;
+bool isDebug, isIndivFramePub, pubAllPoints, isLogging, isOffline;
+std::string keyframePath, allKfPtsPath;
 int numFramesSent = 0;
 
 
@@ -114,16 +116,20 @@ void tfCloud(Eigen::Matrix4d existingTfToBase, Eigen::Matrix4d refToTargTf, ObsR
     kfObs.insert(obsRec);
 }
 
-void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
-    // Take the points from the PointCloud2 message
-    pcl::PointCloud<pcl::PointXY> localCloud;
-    pcl::fromROSMsg(*cloudMsg, localCloud);
 
+void parse2DPC(const int frameID, const pcl::PointCloud<pcl::PointXY>& localCloud) {
+    if (localCloud.size() < 3) {
+        if (isDebug) {
+            std::cout << "Observation does not contain enough points to construct triangulation, discarding...\n";
+            std::cout << "===============================================================" << std::endl;
+        }
+        return;
+    }
     // Construct a PointVector for the given tree positions
     Points vectorOfTrees(2, localCloud.size());
     int idx = 0;
     for (const auto& p : localCloud) vectorOfTrees.col(idx++) = PtLoc{p.x, p.y};
-    ObsRecord myObs(cloudMsg->header.seq, vectorOfTrees, localCloud);
+    ObsRecord myObs(frameID, vectorOfTrees, localCloud);
 
     // Try to match the current frame with any that have been associated with a base frame
     if (!kfObs.empty()) {
@@ -252,7 +258,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 
 
     // If number of associated frames exceeds limit or there have been too many unassociated frames since one was associated: send to backend
-    if (kfObs.size() >= maxKeyframeWidth || (!kfObs.empty() && kfObs.rbegin()->frameId + numSkippedFramesBeforeSend <= cloudMsg->header.seq)) {
+    if (kfObs.size() >= maxKeyframeWidth || (!kfObs.empty() && kfObs.rbegin()->frameId + numSkippedFramesBeforeSend <= frameID)) {
         // At this point, all pc in kfObs should be in the same reference frame
         if (isDebug) {
             std::cout << "Keyframe with IDs ";
@@ -260,10 +266,20 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             std::cout << " sending..." << std::endl;
         }
 
+        // Transmit cumulative point cloud (if desired)
         if (pubAllPoints) {
-            sensor_msgs::PointCloud2 allPointsMsg;
-            pcl::toROSMsg(*bigPcPtr, allPointsMsg);
-            publishPointCloud(bigCloudPub, allPointsMsg, kfObs.begin()->frameId, "sensor_frame");
+            if (isLogging) {
+                std::ofstream allOut(allKfPtsPath+std::to_string(1+numFramesSent)+".txt"); 
+                for (const ObsRecord& kf : kfObs) allOut << (kf == *kfObs.begin() ? "" : " ") << kf.frameId; 
+                for (const auto& p : *bigPcPtr) allOut << std::endl << p.x << " " << p.y;
+                allOut.close();
+            }
+
+            if (!isOffline) {
+                sensor_msgs::PointCloud2 allPointsMsg;
+                pcl::toROSMsg(*bigPcPtr, allPointsMsg);
+                publishPointCloud(bigCloudPub, allPointsMsg, kfObs.begin()->frameId, "sensor_frame");
+            }
         }
 
         // TODO talk to Bailey about efficiently deriving the cluster centers out in either nlogn or linear time
@@ -285,7 +301,7 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             outputCloud.push_back(pclConvert(myCentroidOutput));
         }
 
-        // Log keyframe (if desired)
+        // Log keyframe data
         if (isLogging) {
             std::ofstream kfOut(keyframePath+std::to_string(++numFramesSent)+".txt");
             for (const ObsRecord& kf : kfObs) if (kf.tf.isIdentity()) kfOut << kf.frameId;
@@ -293,16 +309,20 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             kfOut.close();
         }
 
-        // Publish then clear the keyframe
-        sensor_msgs::PointCloud2 kfMsg;
-        pcl::toROSMsg(outputCloud, kfMsg);
-        publishPointCloud(kfpub, kfMsg, kfObs.begin()->frameId, "sensor_frame");
+        // Publish the keyframe
+        if (!isOffline) {
+            sensor_msgs::PointCloud2 kfMsg;
+            pcl::toROSMsg(outputCloud, kfMsg);
+            publishPointCloud(kfpub, kfMsg, kfObs.begin()->frameId, "sensor_frame");
+        }
+
+        // Clear the keyframe
         kfObs.clear();
         bigPcPtr->clear();  // TODO might be overkill because it gets overwritten when base frame re-inits anyway
     }
 
     // If an unassociated frame becomes too old before it can be associated, remove it
-    if (!unassociatedObs.empty() && unassociatedObs.front().frameId + numSkippedFramesBeforeSend <= cloudMsg->header.seq) {
+    if (!unassociatedObs.empty() && unassociatedObs.front().frameId + numSkippedFramesBeforeSend <= frameID) {
         if (isDebug) std::cout << "Deleting frame " << unassociatedObs.front().frameId << " from unassociated observations." << std::endl;
         unassociatedObs.erase(unassociatedObs.begin());
     }
@@ -311,20 +331,70 @@ void parse2DPC(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 }
 
 
-// TODO implement keyframe width parameter (default should be 5)
+void buildKeyframes(const std::string& localObsPath) {
+    // Sort the local observations in sequential order
+    std::map<int, std::string> orderedInputPaths;
+    for (const auto& entry : std::filesystem::directory_iterator(localObsPath)) {
+        orderedInputPaths[atoi(entry.path().filename().replace_extension("").string().c_str())] = entry.path();
+    }
+
+    std::cout << "Processing observations from " << localObsPath << " into keyframes." << std::endl;
+
+    Eigen::VectorXi runtimePerObs(orderedInputPaths.size());
+    for (const auto& [id, obsPath] : orderedInputPaths) {
+        std::ifstream inFile(obsPath);
+        pcl::PointCloud<pcl::PointXY> inputCloud;
+
+        pcl::PointXY p; double radius; std::string line;
+        std::cout << "Reading file " << id << std::endl;
+
+        while (std::getline(inFile, line)) {
+            std::istringstream iss(line);   // only collect landmark data
+            if (iss >> p.x >> p.y >> radius) inputCloud.push_back(p);
+        }
+        inFile.close();
+        std::cout << "Finished reading file " << id << ", " << inputCloud.size() << " total points" << std::endl;
+
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        parse2DPC(id, inputCloud);
+        auto t2 = std::chrono::high_resolution_clock::now();
+        auto ms_int = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+        runtimePerObs(id) = ms_int.count();
+    }
+    std::cout << "Max time to process observation: " << runtimePerObs.maxCoeff() << "ms" << std::endl;
+}
+
+void observationsReady(const std_msgs::String::ConstPtr& msg) {
+// void observationsReady(const std_msgs::String::Ptr& msg) {
+    keyframePath = msg->data+"/keyframe/";
+    allKfPtsPath = msg->data+"/allKfPts/";
+    buildKeyframes(msg->data+"/local_obs");
+    donePub.publish(msg);
+    unassociatedObs.clear(); kfObs.clear(); bigPcPtr->clear();
+}
+
+
+
+void readLiveObservation(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
+    // Take the points from the PointCloud2 message
+    pcl::PointCloud<pcl::PointXY> localCloud;
+    pcl::fromROSMsg(*cloudMsg, localCloud);
+    parse2DPC(cloudMsg->header.seq, localCloud);
+}
+
+
 int main(int argc, char **argv) {
     // Initialize Node and read in private parameters
     ros::init(argc, argv, "keyframe_maker");
     ros::NodeHandle n("~");
-    std::string absolutePackagePath = ros::package::getPath("urquhart"), outputPath;
-    n.param<std::string>("/outputDirName", outputPath, "testOutput");
-    keyframePath = absolutePackagePath+"/output/"+outputPath+"/keyframe/";
 
     // booleans
+    isLogging = n.param("/logging", true);
+    isOffline = n.param("/offline", true);
     isDebug = n.param("debug", true);
-    isIndivFramePub = n.param("indivFramePub", false);
     pubAllPoints = n.param("pubAllPoints", false);
-    isLogging = n.param("/logging", false);
+    isIndivFramePub = n.param("indivFramePub", false) && !isOffline;
 
     // integers
     numSideBoundsForMatch = n.param("numSideBoundsForMatch", 3);
@@ -339,14 +409,23 @@ int main(int argc, char **argv) {
     validPointMatchThresh = n.param("validPointMatchThresh", 1.0);
     clusterTolerance = n.param("clusterTolerance", 0.1);
 
-    ros::Subscriber sub = n.subscribe("/sim_path/local_points", 10, parse2DPC);
-    kfpub = n.advertise<sensor_msgs::PointCloud2>("keyframe", 10);
+    ros::Subscriber sub;
+    if (isOffline) {
+        donePub = n.advertise<std_msgs::String>("doneFlag", 10);
+        sub = n.subscribe("/sim_path/doneFlag", 25, observationsReady);
+    } else {
+        std::string absolutePackagePath = ros::package::getPath("urquhart"), outputPath;
+        n.param<std::string>("/outputDirName", outputPath, "testOutput");
+        keyframePath = absolutePackagePath+"/output/"+outputPath+"/keyframe/";
+        allKfPtsPath = absolutePackagePath+"/output/"+outputPath+"/allKfPts/";
 
-    if (isIndivFramePub) hierPub = n.advertise<std_msgs::String>("hierarchy", 10);
-    if (pubAllPoints) bigCloudPub = n.advertise<sensor_msgs::PointCloud2>("allPoints", 10);
+        sub = n.subscribe("/sim_path/local_points", 10, readLiveObservation);
+        kfpub = n.advertise<sensor_msgs::PointCloud2>("keyframe", 10);
+        if (isIndivFramePub) hierPub = n.advertise<std_msgs::String>("hierarchy", 10);
+        if (pubAllPoints) bigCloudPub = n.advertise<sensor_msgs::PointCloud2>("allPoints", 10);
+    }
 
     ros::spin();
-
 
     return 0;
 }

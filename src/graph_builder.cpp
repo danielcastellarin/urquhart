@@ -713,6 +713,15 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
     // Take the points from the PointCloud2 message and create a geometric hierarchy from it
     pcl::PointCloud<pcl::PointXY> localCloud;
     pcl::fromROSMsg(*cloudMsg, localCloud);
+    if (localCloud.size() < 3) {
+        if (isConsoleDebug) {
+            std::cout << "Keyframe does not contain enough points to construct triangulation, discarding...\n";
+            std::cout << "===============================================================" << std::endl;
+        }
+        if (isLogging) logDroppedFrame(outputPath+"/global", cloudMsg->header.seq);
+        return;
+    }
+
     Points vectorOfTrees(2, localCloud.size());
     int idx = 0;
     for (const auto& p : localCloud) vectorOfTrees.col(idx++) = PtLoc{p.x, p.y};

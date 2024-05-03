@@ -54,10 +54,6 @@ catkin_package(
    DEPENDS)
 
 
-add_executable(CreateLogs src/create_logs.cpp)
-target_include_directories(CreateLogs PUBLIC ${catkin_INCLUDE_DIRS})
-target_link_libraries(CreateLogs PUBLIC ${catkin_LIBRARIES})
-
 # ROS forest generator
 add_executable(CreateForest src/my_old/poisson_disk_sampling.cpp)
 target_include_directories(CreateForest PUBLIC ${catkin_INCLUDE_DIRS})
@@ -80,9 +76,13 @@ SET_TARGET_PROPERTIES(ForestSim PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
 
 # include_directories(include ${catkin_INCLUDE_DIRS})
 # Robot Path Simulation ROS Node
-add_executable(ultimate_path src/ultimate_path.cpp)
-target_link_libraries(ultimate_path ${PCL_LIBRARIES} ${catkin_LIBRARIES})
-target_include_directories(ultimate_path PUBLIC include ${catkin_INCLUDE_DIRS})
+# add_executable(ultimate_path src/ultimate_path.cpp)
+# target_link_libraries(ultimate_path ${PCL_LIBRARIES} ${catkin_LIBRARIES})
+# target_include_directories(ultimate_path PUBLIC include ${catkin_INCLUDE_DIRS})
+
+add_executable(SimPath src/sim_path.cpp)
+target_link_libraries(SimPath ${PCL_LIBRARIES} ${catkin_LIBRARIES})
+target_include_directories(SimPath PUBLIC include ${catkin_INCLUDE_DIRS})
 
 
 # Garbage test program

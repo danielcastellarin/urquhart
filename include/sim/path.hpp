@@ -15,12 +15,11 @@ struct SimConfig
     // Required Parameters
     std::vector<Tree> forest;
     std::string forestFile, pathType;
-    double distanceToTravel, distanceBetweenObservations, observationRadius, 
-    collisionRadius, landmarkAssociationThreshold, treeAssociationThreshold, 
+    double distanceToTravel, distanceBetweenObservations, observationRadius, collisionRadius, 
     // Optional Parameters
     successfulObservationProbability, treePositionStandardDeviation, treeRadiusStandardDeviation,
     pubRate;
-    int initializationAttempts, numObservationsForValidLandmark, randomSeed;
+    int initializationAttempts, randomSeed;
     bool givenStartPose = false, isLogging = false;
     Pose initialPose;
     std::string outputDirName;
@@ -38,8 +37,6 @@ struct SimConfig
         distanceBetweenObservations = nh.param("distanceBetweenObservations", 0.2);
         observationRadius = nh.param("observationRange", 15);   // Note "Radius" and "Range"! (naming changes from paramter to code)
         collisionRadius = nh.param("collisionRadius", 0.3);
-        landmarkAssociationThreshold = nh.param("landmarkAssociationThreshold", 0.8);
-        treeAssociationThreshold = nh.param("treeAssociationThreshold", 0.5);   // should be smaller than landmark association thresh
 
         // Optional parameters
         successfulObservationProbability = nh.param("successfulObservationProbability", 1.0);
@@ -53,7 +50,6 @@ struct SimConfig
         }
         pubRate = nh.param("pubRate", 10.0); // Hz
         initializationAttempts = nh.param("initializationAttempts", 10000);
-        numObservationsForValidLandmark = nh.param("initializationAttempts", 5);
         randomSeed = nh.param("randomSeed", -1);
 
         // Setup logging (if necessary)
@@ -70,16 +66,11 @@ struct SimConfig
         out << "Distance between observations: " << distanceBetweenObservations << std::endl;
         out << "Observation radius: " << observationRadius << std::endl;
         out << "Collision width: " << collisionRadius << std::endl;
-        out << "Landmark association threshold: " << landmarkAssociationThreshold << std::endl;
-        out << "Point association threshold: " << treeAssociationThreshold << std::endl;
         out << "Detection noise: " << successfulObservationProbability << std::endl;
         out << "Position noise: " << treePositionStandardDeviation << std::endl;
         out << "Tree radius noise: " << treeRadiusStandardDeviation << std::endl;
-        out << "Publishing Rate: " << pubRate << std::endl;
         out << "Maximum initialization attempts: " << initializationAttempts << std::endl;
-        out << "Number of observations to validate a landmark: " << numObservationsForValidLandmark << std::endl;
         out << "Random seed: " << (randomSeed >= 0 ? std::to_string(randomSeed) : "None") << std::endl;
-        out << "Starting pose input: " << (givenStartPose ? initialPose.printPose() : "None") << std::endl;
     }
 };
 
@@ -96,8 +87,6 @@ struct SimKeyframe {
 class Path {
     float obsRadius;
     float obsRadiusSq;
-    float ldmkAssocThresh;
-    float ptAssocThresh;
 
     bool givenInitialPose;
     int initAttempts;
@@ -138,8 +127,9 @@ class Path {
         virtual bool isValid()=0;
         virtual double getNextPoseOnPath(double distanceTravelled)=0;    // return value is the linear distance travelled
         Point findValidPoint();
-        bool validateStartingPose();
+        bool validateStartingPose(bool isDebug);
         SimKeyframe observe();
+        void resetPath();
 
         // default detection noise simply is a percentage chance asking "is tree detected?"
         // Potential improvement: detection noise can be proportional to gaussian (tree less likely to be seen further away from obs)
