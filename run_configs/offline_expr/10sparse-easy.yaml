@@ -1,0 +1,33 @@
+logging: true
+outputDirName: sparse-c11
+totalRuns: 10
+offline: true
+
+sim_path:
+  forestFile: coolForest.txt
+  pathType: circle
+  distanceToTravel: 200
+  distanceBetweenObservations: 0.20
+  observationRange: 40
+  collisionRadius: 0.3
+  successfulObservationProbability: 0.95
+  treePositionStandardDeviation: 0.1
+  favorableSpawns: true
+  # pubRate: 5
+  # randomSeed: 17
+  debug: false
+  # startPoseX: -50
+  # startPoseY: -50
+  # startPoseTheta: 0
+
+
+keyframe_maker:
+  debug: false
+  indivFramePub: false
+  pubAllPoints: true
+
+graph_builder:
+  # UNCOMMENT TO USE PROVIDE MAP
+  # startingMap: coolForest.txt
+  consoleDebug: false
+  realtimeVis: false

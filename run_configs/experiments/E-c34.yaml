@@ -18,7 +18,7 @@ sim_path:
 keyframe_maker:
   debug: false
   indivFramePub: false
-  pubAllPoints: false
+  pubAllPoints: true
 
   maxKeyframeWidth: 8
   numSkippedFramesBeforeSend: 3
@@ -28,6 +28,7 @@ keyframe_maker:
   reqMatchesForFrameAssoc: 7
   
   clusterTolerance: 1.0         # The radius for the clustering algorithm to perform k-NN searching (used to find its candidate points)
+  # clusterTolerance: 2.0         # The radius for the clustering algorithm to perform k-NN searching (used to find its candidate points)
 
 
 graph_builder:

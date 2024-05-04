@@ -64,6 +64,10 @@ Path::Path(SimConfig cfg) : rng(randomDevice()) {
         if (t.p.y < minY) minY = t.p.y;
         else if (t.p.y > maxY) maxY = t.p.y;
     }
+    if (cfg.favorableSpawns) {
+        double quarterX = (maxX - minX) / 4, quarterY = (maxY - minY) / 4;
+        minX += quarterX; maxX -= quarterX; minY += quarterY, maxY -= quarterY;
+    }
     randX = std::uniform_real_distribution<double>{minX, maxX};
     randY = std::uniform_real_distribution<double>{minY, maxY};
     randTheta = std::uniform_real_distribution<double>{-PI, PI};

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <launch>
     <!-- <arg name="configFile" default="E-c34.yaml" /> -->
-    <rosparam file="$(find urquhart)/run_configs/super_exp/10-diff.yaml" command="load" />
-    <!-- <rosparam file="$(find urquhart)/run_configs/super_exp/1-live.yaml" command="load" /> -->
+    <rosparam file="$(find urquhart)/run_configs/super_exp/x34.yaml" command="load" />
+    <rosparam file="$(find urquhart)/run_configs/super_exp/offline-10-diff.yaml" command="load" />
     
     <!-- Simulate Robot Observations -->
     <node pkg="urquhart" type="SimPath" name="sim_path" output="screen" />
