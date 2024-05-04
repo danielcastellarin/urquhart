@@ -20,7 +20,7 @@ struct SimConfig
     successfulObservationProbability, treePositionStandardDeviation, treeRadiusStandardDeviation,
     pubRate;
     int initializationAttempts, randomSeed;
-    bool givenStartPose = false, isLogging = false;
+    bool givenStartPose = false, isLogging = false, favorableSpawns = false;
     Pose initialPose;
     std::string outputDirName;
 
@@ -51,6 +51,7 @@ struct SimConfig
         pubRate = nh.param("pubRate", 10.0); // Hz
         initializationAttempts = nh.param("initializationAttempts", 10000);
         randomSeed = nh.param("randomSeed", -1);
+        favorableSpawns = nh.param("favorableSpawns", false);
 
         // Setup logging (if necessary)
         isLogging = nh.param("/logging", false);
