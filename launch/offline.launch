@@ -2,6 +2,7 @@
 <launch>
     <!-- <arg name="configFile" default="E-c34.yaml" /> -->
     <rosparam file="$(find urquhart)/run_configs/super_exp/10-diff.yaml" command="load" />
+    <!-- <rosparam file="$(find urquhart)/run_configs/super_exp/1-live.yaml" command="load" /> -->
     
     <!-- Simulate Robot Observations -->
     <node pkg="urquhart" type="SimPath" name="sim_path" output="screen" />
@@ -10,6 +11,17 @@
     <node pkg="urquhart" type="KeyframeGen" name="keyframe_maker" output="screen" />
 
     <!-- Global GraphSLAM Node -->
-    <!-- <node pkg="urquhart" type="PolygonSLAM" name="graph_builder" output="screen" /> -->
+    <node pkg="urquhart" type="PolygonSLAM" name="graph_builder" output="screen" />
+
+    <!-- Analytics Node -->
+    <node pkg="urquhart" type="runtime_eval_SLAM.py" name="eval_raw_SLAM" output="screen" />
+
+    <!-- Visualizations -->
+    <!-- <group ns="sim_path">
+        <node pkg="urquhart" type="live_pc.py" name="pc_display" output="screen">
+            <param name="topicName" value="local_points" />
+        </node>
+    </group>
+    <node pkg="urquhart" type="live_graph.py" name="graph_display" output="screen" /> -->
 
 </launch>

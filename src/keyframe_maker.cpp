@@ -344,17 +344,13 @@ void buildKeyframes(const std::string& localObsPath) {
     for (const auto& [id, obsPath] : orderedInputPaths) {
         std::ifstream inFile(obsPath);
         pcl::PointCloud<pcl::PointXY> inputCloud;
-
         pcl::PointXY p; double radius; std::string line;
-        std::cout << "Reading file " << id << std::endl;
 
         while (std::getline(inFile, line)) {
             std::istringstream iss(line);   // only collect landmark data
             if (iss >> p.x >> p.y >> radius) inputCloud.push_back(p);
         }
         inFile.close();
-        std::cout << "Finished reading file " << id << ", " << inputCloud.size() << " total points" << std::endl;
-
 
         auto t1 = std::chrono::high_resolution_clock::now();
         parse2DPC(id, inputCloud);
@@ -362,16 +358,23 @@ void buildKeyframes(const std::string& localObsPath) {
         auto ms_int = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
         runtimePerObs(id) = ms_int.count();
     }
-    std::cout << "Max time to process observation: " << runtimePerObs.maxCoeff() << "ms" << std::endl;
+    std::cout << "Max time to process observations: " << runtimePerObs.maxCoeff() << "ms" << std::endl;
 }
 
 void observationsReady(const std_msgs::String::ConstPtr& msg) {
-// void observationsReady(const std_msgs::String::Ptr& msg) {
-    keyframePath = msg->data+"/keyframe/";
-    allKfPtsPath = msg->data+"/allKfPts/";
-    buildKeyframes(msg->data+"/local_obs");
-    donePub.publish(msg);
-    unassociatedObs.clear(); kfObs.clear(); bigPcPtr->clear();
+    if (msg->data == "shutdown") {
+        std_msgs::String doneMsg;
+        doneMsg.data = "shutdown";
+        donePub.publish(doneMsg);
+        ros::shutdown();
+    } else {
+        keyframePath = msg->data+"/keyframe/";
+        allKfPtsPath = msg->data+"/allKfPts/";
+        buildKeyframes(msg->data+"/local_obs");
+        donePub.publish(msg);
+        unassociatedObs.clear(); kfObs.clear(); bigPcPtr->clear();
+        numFramesSent = 0;
+    } 
 }
 
 
@@ -411,7 +414,7 @@ int main(int argc, char **argv) {
 
     ros::Subscriber sub;
     if (isOffline) {
-        donePub = n.advertise<std_msgs::String>("doneFlag", 10);
+        donePub = n.advertise<std_msgs::String>("doneFlag", 20);
         sub = n.subscribe("/sim_path/doneFlag", 25, observationsReady);
     } else {
         std::string absolutePackagePath = ros::package::getPath("urquhart"), outputPath;

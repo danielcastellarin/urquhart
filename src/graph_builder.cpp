@@ -125,6 +125,9 @@ struct PLEdge {
 };
 
 
+
+std::shared_ptr<urquhart::Observation> initialMap = NULL;
+std::vector<LandmarkNode> initialMapLandmarkNodes;
 struct SLAMGraph {
     std::shared_ptr<urquhart::Observation> geoHier = NULL;
     Eigen::VectorXd stateVector;
@@ -138,6 +141,24 @@ struct SLAMGraph {
     std::vector<double> globalErrors;   // For performance measurement purposes...
 
     SLAMGraph() {}
+
+    void resetGraph(bool isMapGiven) {
+        // TODO resetGraph should not be run if node is live!
+        // TODO reassign initial map if map given (move shared pointer if live)
+        // TODO reassign landmark node list if initial map given
+        if (isMapGiven) {
+            geoHier = std::make_shared<urquhart::Observation>(*initialMap);
+            landmarkNodeList = initialMapLandmarkNodes;
+        } else {
+            geoHier = NULL;
+            landmarkNodeList.clear();
+        }
+        poseNodeList.clear();
+        stateVector.resize(0); // clear state vector
+        ppEdges.clear();
+        plEdges.clear();
+        globalErrors.clear();
+    }
 
     inline int getPoseSVIdx(int idx) { return poseNodeList[idx].stateVectorIdx; }
     inline int getLdmkSVIdx(int idx) { return landmarkNodeList[idx].stateVectorIdx; }
@@ -653,7 +674,7 @@ std::map<int, Points> activeObsWindow;
 
 // Output options (screen, logs, realtime)
 bool isConsoleDebug = false, isLogging = false, isRealtimeVis = false;
-ros::Publisher graphPub, hierPub;
+ros::Publisher graphPub, hierPub, donePub;
 std::string outputPath, startingMap;
 
 // Parameters for keyframe-global polygon matching
@@ -700,35 +721,33 @@ void deleteTreeAssoc(std::unordered_map<PointRef, AssocSet, hash_pair>& map, Poi
 
 
 
-// @@@@@@@@@@@@@@@@@
-// @ NODE CALLBACK @
-// @@@@@@@@@@@@@@@@@
+// @@@@@@@@@@@@@@@@
+// @ UPDATE GRAPH @
+// @@@@@@@@@@@@@@@@
 
-void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
-    if (isConsoleDebug) std::cout << "Received keyframe " << cloudMsg->header.seq << std::endl;
+void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& localCloud) {
+    if (isConsoleDebug) std::cout << "Received keyframe " << frameID << std::endl;
 
     // Remember the state of the graph before this keyframe in case we need to do a rollback
     // #SV space added = 2 * #landmarks init + 3 (the pose)
 
-    // Take the points from the PointCloud2 message and create a geometric hierarchy from it
-    pcl::PointCloud<pcl::PointXY> localCloud;
-    pcl::fromROSMsg(*cloudMsg, localCloud);
     if (localCloud.size() < 3) {
         if (isConsoleDebug) {
             std::cout << "Keyframe does not contain enough points to construct triangulation, discarding...\n";
             std::cout << "===============================================================" << std::endl;
         }
-        if (isLogging) logDroppedFrame(outputPath+"/global", cloudMsg->header.seq);
+        if (isLogging) logDroppedFrame(outputPath+"/global", frameID);
         return;
     }
 
+    // Take the points from the PointCloud2 message and create a geometric hierarchy from it
     Points vectorOfTrees(2, localCloud.size());
     int idx = 0;
     for (const auto& p : localCloud) vectorOfTrees.col(idx++) = PtLoc{p.x, p.y};
     urquhart::Observation localObs(vectorOfTrees);
 
     // Save local observation data (if desired)
-    if (isConsoleDebug) std::cout << "Defined local observation for keyframe " << cloudMsg->header.seq << " with " << vectorOfTrees.cols() << " observed trees." << std::endl;
+    if (isConsoleDebug) std::cout << "Defined local observation for keyframe " << frameID << " with " << vectorOfTrees.cols() << " observed trees." << std::endl;
     if (isLogging) {
         writeHierarchyFiles(localObs, outputPath+"/local", std::to_string(g.poseNodeList.size()+1)+".txt");
         std::ofstream ptsOut(outputPath+"/local/pts/"+std::to_string(g.poseNodeList.size()+1)+".txt");
@@ -761,7 +780,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         }
 
         if (isConsoleDebug) {
-            std::cout << "Constructed initial global geometric hierarchy " << cloudMsg->header.seq << std::endl;
+            std::cout << "Constructed initial global geometric hierarchy " << frameID << std::endl;
             std::cout << "Number of initial trees: " << localObs.landmarks.cols() << std::endl;
         }
 
@@ -770,7 +789,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             std::stringstream graphStream;
 
             // Keyframe ID
-            graphStream << cloudMsg->header.seq << "|";
+            graphStream << frameID << "|";
             
             // Initial Pose
             graphStream << g.poseNodeList[0].pose(0) << " " << g.poseNodeList[0].pose(1) << " " << g.poseNodeList[0].pose(2) << "|";
@@ -819,10 +838,10 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         // Exit early if we couldn't find matches within a reasonable amount of time
         if (matchingPointIndices.size() < ransacMatchPrereq) {
             if (isConsoleDebug){
-                std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because no matches could be found." << std::endl;
+                std::cout << "Dropping keyframe " << frameID << " because no matches could be found." << std::endl;
                 std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << std::endl;
             }
-            if (isLogging) logDroppedFrame(outputPath+"/global", cloudMsg->header.seq);
+            if (isLogging) logDroppedFrame(outputPath+"/global", frameID);
             return;
         }
 
@@ -859,10 +878,10 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
                             ransacMatchRatio,
                             maxSensorRange)) {
             if (isConsoleDebug) {
-                std::cout << "Dropping keyframe " << cloudMsg->header.seq << " because all potential matches could not be verified." << std::endl;
+                std::cout << "Dropping keyframe " << frameID << " because all potential matches could not be verified." << std::endl;
                 std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << std::endl;
             }
-            if (isLogging) logDroppedFrame(outputPath+"/global", cloudMsg->header.seq);
+            if (isLogging) logDroppedFrame(outputPath+"/global", frameID);
             return;
         }
 
@@ -1042,7 +1061,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
             std::stringstream graphStream;
 
             // Keyframe ID
-            graphStream << cloudMsg->header.seq << "|";
+            graphStream << frameID << "|";
 
             int tmpIdx = 0; // Poses
             for (const auto& pn : g.poseNodeList) graphStream << (tmpIdx++!=0 ? ":": "") << pn.pose(0) << " " << pn.pose(1) << " " << pn.pose(2);
@@ -1073,7 +1092,7 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
         if (wasLastFrameRolledBack) {  // TODO what if I did two sequential optimizations here?
             unresolvedLandmarks = unresolvedLandmarksCopy;
             activeObsWindow.erase(g.poseNodeList.size()); // last pose node has already been popped from list
-            if (isLogging) logDroppedFrame(outputPath+"/global", cloudMsg->header.seq);
+            if (isLogging) logDroppedFrame(outputPath+"/global", frameID);
             return;
         }
         if (isConsoleDebug) {
@@ -1192,7 +1211,65 @@ void constructGraph(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
 }
 
 
-// TODO Validate matches in global are within twice the observation radius of the robot
+void buildGlobalMap(const std::string& keyframesPath) {
+    // Sort the local observations in sequential order
+    std::map<int, std::string> orderedInputPaths;
+    for (const auto& entry : std::filesystem::directory_iterator(keyframesPath)) {
+        orderedInputPaths[atoi(entry.path().filename().replace_extension("").string().c_str())-1] = entry.path();
+    }
+
+    std::cout << "Processing keyframes from " << keyframesPath << " into a global map." << std::endl;
+
+    Eigen::VectorXi runtimePerKf(orderedInputPaths.size());
+    for (const auto& [id, obsPath] : orderedInputPaths) {
+        std::ifstream inFile(obsPath);
+        pcl::PointCloud<pcl::PointXY> inputCloud;
+        pcl::PointXY p; std::string line;
+        std::getline(inFile, line); // Skip first line, because I don't care about what observation this came from
+
+        while (std::getline(inFile, line)) {
+            std::istringstream iss(line);   // only collect landmark data
+            if (iss >> p.x >> p.y) inputCloud.push_back(p);
+        }
+        inFile.close();
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        constructGraph(id, inputCloud);
+        auto t2 = std::chrono::high_resolution_clock::now();
+        auto ms_int = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+        runtimePerKf(id) = ms_int.count();
+    }
+    std::cout << "Max time to process keyframes: " << runtimePerKf.maxCoeff() << "ms" << std::endl;
+}
+
+
+// @@@@@@@@@@@@@@@@@@
+// @ NODE CALLBACKS @
+// @@@@@@@@@@@@@@@@@@
+
+void keyframesReady(const std_msgs::String::ConstPtr& msg) {
+    if (msg->data == "shutdown") {
+        std_msgs::String doneMsg;
+        doneMsg.data = "shutdown";
+        donePub.publish(doneMsg);
+        ros::shutdown();
+    } else {
+        g.resetGraph(!!initialMap);
+        outputPath = msg->data;
+        buildGlobalMap(msg->data+"/keyframe");
+        donePub.publish(msg);
+        unresolvedLandmarks.clear();
+        activeObsWindow.clear();
+    }
+}
+
+void readLiveKeyframe(const sensor_msgs::PointCloud2ConstPtr& cloudMsg) {
+    // Take the points from the PointCloud2 message
+    pcl::PointCloud<pcl::PointXY> localCloud;
+    pcl::fromROSMsg(*cloudMsg, localCloud);
+    constructGraph(cloudMsg->header.seq, localCloud);
+}
+
 
 // TODO Store rejected keyframes for a little bit
 // Try matching them together to build additional maps
@@ -1210,7 +1287,8 @@ int main(int argc, char **argv) {
     outputPath = absolutePackagePath+"/output/"+outputPath;
     isLogging = n.param("/logging", false);
     isConsoleDebug = n.param("consoleDebug", true);
-    isRealtimeVis = n.param("realtimeVis", false);
+    bool isOffline = n.param("/offline", false);
+    isRealtimeVis = n.param("realtimeVis", false) && !isOffline;
 
     // Hierarchy matching parameters
     polyMatchThresh = n.param("polyMatchThreshStart", 5.0);
@@ -1261,24 +1339,34 @@ int main(int argc, char **argv) {
             Points landmarks(2, intake.size());
             for (int i = 0; i < intake.size(); ++i) {
                 landmarks.col(i) = intake[i];
-                g.addLandmarkNode(i);    // maybe TODO need to only initialize nodes for landmarks the robot sees? 
-                // g.addLandmarkNode(i, intake[i]); 
+                initialMapLandmarkNodes.push_back(LandmarkNode(i, -1));
             }
             // Save global geometric hierarchy
-            if (intake.size() > 0) {
-                urquhart::Observation globalMap(landmarks);
-                g.geoHier = std::make_shared<urquhart::Observation>(std::move(globalMap));
-
-            } else std::cout << "'" << startingMap << "' did not contain a valid map, ignoring..." << std::endl;
+            if (intake.size() > 0) initialMap = std::make_shared<urquhart::Observation>(urquhart::Observation(landmarks));
+            else std::cout << "'" << startingMap << "' did not contain a valid map, ignoring..." << std::endl;
         } else std::cout << "Could not find map at '" << startingMap << "', ignoring..." << std::endl;
     }
 
     // Initialize Pubs/Subs
-    ros::Subscriber sub = n.subscribe("/keyframe_maker/keyframe", 10, constructGraph);
-    if (isRealtimeVis) {
-        hierPub = n.advertise<std_msgs::String>("hierarchy", 10);
-        graphPub = n.advertise<std_msgs::String>("graph", 10);
+    ros::Subscriber sub;
+    
+    
+    if (isOffline) {
+        donePub = n.advertise<std_msgs::String>("doneFlag", 10);
+        sub = n.subscribe("/keyframe_maker/doneFlag", 200, keyframesReady);
+    } else {
+        if (!startingMap.empty()) {
+            g.geoHier = std::move(initialMap);
+            g.landmarkNodeList = initialMapLandmarkNodes;
+        }
+        if (isRealtimeVis) {
+            hierPub = n.advertise<std_msgs::String>("hierarchy", 10);
+            graphPub = n.advertise<std_msgs::String>("graph", 10);
+        }
+        sub = n.subscribe("/keyframe_maker/keyframe", 10, readLiveKeyframe);
     }
+
+
     ros::spin();
 
     return 0;

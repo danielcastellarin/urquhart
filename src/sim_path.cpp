@@ -158,13 +158,13 @@ int main(int argc, char **argv) {
     
 
     // Define publishers
-    ros::Publisher gpPub, lpPub, gPosePub, donePub = n.advertise<std_msgs::String>("doneFlag", 10);
+    ros::Publisher gpPub, lpPub, gPosePub, donePub;
     std_msgs::String doneMsg;
     if (!isOffline) {
         gpPub = n.advertise<sensor_msgs::PointCloud2> ("global_points", 1);
         lpPub = n.advertise<sensor_msgs::PointCloud2>("local_points", 1);
         gPosePub = n.advertise<geometry_msgs::Pose2D>("global_pose", 1);
-    }
+    } else donePub = n.advertise<std_msgs::String>("doneFlag", 10);
 
 
     // Initialize the path through the forest
@@ -262,8 +262,10 @@ int main(int argc, char **argv) {
                 isFinished = nextObs.isLast;
             }
 
-            doneMsg.data = outputLocation;
-            donePub.publish(doneMsg);
+            if (isOffline) {
+                doneMsg.data = outputLocation;
+                donePub.publish(doneMsg);
+            }
 
         } else {
             if (isDebug) std::cout << "Could not find a valid starting position (random initialization attempts exceeded limit)." << std::endl;
@@ -273,8 +275,15 @@ int main(int argc, char **argv) {
         robotPath->resetPath();
     }
 
-    if (isDebug) std::cout << "Successfully simulated " << totalRuns << " run(s)." << std::endl;
-    delete robotPath;
+    // Signal downstream processes to shutdown
+    if (isOffline) {
+        doneMsg.data = "shutdown";
+        donePub.publish(doneMsg);
+    }
 
+    ros::Duration(5).sleep(); // sleep for a little to make sure all published messages leave
+    delete robotPath;
+    if (isDebug) std::cout << "Successfully simulated " << totalRuns << " run(s)." << std::endl;
+    
     return 0;
 }

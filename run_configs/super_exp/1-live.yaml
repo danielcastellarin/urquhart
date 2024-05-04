@@ -1,7 +1,7 @@
 logging: true
 outputDirName: X-c34
-totalRuns: 10
-offline: true
+totalRuns: 1
+offline: false
 
 sim_path:
   forestFile: coolForest.txt
@@ -12,8 +12,8 @@ sim_path:
   collisionRadius: 0.3
   successfulObservationProbability: 0.80
   treePositionStandardDeviation: 0.3
-  # pubRate: 5
-  # randomSeed: 17
+  pubRate: 5
+  randomSeed: 17
   debug: false
   # startPoseX: -50
   # startPoseY: -50
@@ -38,7 +38,7 @@ keyframe_maker:
 
 graph_builder:
   consoleDebug: false
-  realtimeVis: false
+  realtimeVis: true
 
   polyMatchThreshStart: 2.0     # Tight polygon match threshold
   polyMatchThreshStep: 0.5
