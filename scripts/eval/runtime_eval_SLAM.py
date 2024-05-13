@@ -6,12 +6,14 @@ import time
 import pandas as pd
 
 import rospy
+from rospkg import RosPack
 from std_msgs.msg import String
 
-dfCols = ["Name", "# Updates", "Robot Position Error", "Robot Orientation Error", "# Landmarks Seen", "Landmark Position Error"]
+dfCols = ["Name", "# RP", "RPE", "ROE", "# Unique Landmarks", "LPE"]
 superDF = pd.DataFrame(columns=dfCols)
+isGivenMap = False
 
-def gatherRunData(outputPath: str):
+def gatherRunData(outputPath: str, hasGlobalMap = False):
     # Record which ground truth observation each keyframe as its base frame
     keyframeFiles = [filename for filename in os.listdir(outputPath+"/keyframe") if filename.endswith(".txt")]
     droppedKeyframes = set(int(fID.strip('\n')) for fID in open(outputPath+"/global/!droppedKeyframes.txt") if fID.strip('\n').isdigit()) if os.path.isfile(outputPath+"/global/!droppedKeyframes.txt") else set()
@@ -33,10 +35,12 @@ def gatherRunData(outputPath: str):
     locSin, locCos = math.sin(-locStartTheta), math.cos(locStartTheta)
     finalLocalPoses = []
     for obsID in keyframeToObs:
-        currLocalX, currLocalY, currLocalTheta = localPoses[obsID]
-        currLocalX -= locStartX
-        currLocalY -= locStartY
-        finalLocalPoses.append((currLocalX*locCos - currLocalY*locSin, currLocalX*locSin + currLocalY*locCos, currLocalTheta-locStartTheta))
+        if isGivenMap: finalLocalPoses.append(globalPoses[obsID])
+        else:
+            currLocalX, currLocalY, currLocalTheta = localPoses[obsID]
+            currLocalX -= locStartX
+            currLocalY -= locStartY
+            finalLocalPoses.append((currLocalX*locCos - currLocalY*locSin, currLocalX*locSin + currLocalY*locCos, currLocalTheta-locStartTheta))
 
 
     # Get ground truth global observations from "global_obs" (x,y,radius)
@@ -49,9 +53,11 @@ def gatherRunData(outputPath: str):
     groundTruthLocalLandmarks = []
     globSin, globCos = math.sin(-startTheta), math.cos(startTheta)
     for x,y in set(ldmk for i in range(len(globalObs)) for ldmk in globalObs[i]):
-        x -= startX
-        y -= startY
-        groundTruthLocalLandmarks.append((x*globCos - y*globSin, x*globSin + y*globCos))
+        if hasGlobalMap: groundTruthLocalLandmarks.append((x, y))
+        else:  
+            x -= startX
+            y -= startY
+            groundTruthLocalLandmarks.append((x*globCos - y*globSin, x*globSin + y*globCos))
 
 
     # Get robot pose and landmark positions over time
@@ -86,7 +92,9 @@ def gatherRunData(outputPath: str):
             closestLdmksToMap.append(math.sqrt(closestDist))
 
         graphInstanceErrors[int(filename.split(".")[0])-1] = (poseErrors, closestLdmksToMap)
+
     return graphInstanceErrors, len(groundTruthLocalLandmarks)
+
 
 def prepAnalyticType(thisAnalyticsPath: str, runName: str, analyticType: str):
     subAggFile = open(f"{thisAnalyticsPath}/!{analyticType}Agg.txt", "w")
@@ -101,6 +109,7 @@ def prepAnalyticType(thisAnalyticsPath: str, runName: str, analyticType: str):
     return subAggFile
 
 def callback(msg: String):
+    global isGivenMap
     if (msg.data == "shutdown"):
         with pd.option_context('display.max_rows', None,
                        'display.max_columns', None,
@@ -138,7 +147,9 @@ def callback(msg: String):
         # Aggregate analytic data
         numPoses, numLdmks, numUpdates = 0, 0, 0
         positionErrorSums, angleErrorSums, ldmkErrorSums = [], [], []
-        graphErrors, numGTLandmarks = gatherRunData(thisOutputPath)
+        # positionErrorMins, angleErrorMins, ldmkErrorMins = [], [], []
+        # positionErrorMaxs, angleErrorMaxs, ldmkErrorMaxs = [], [], []
+        graphErrors, numGTLandmarks = gatherRunData(thisOutputPath, isGivenMap)
         for i, (poseErrors, closestLdmksToMap) in enumerate(graphErrors):
             if i: 
                 poseAggFile.write("\n")
@@ -153,8 +164,7 @@ def callback(msg: String):
 
             # Poses (individual)
             with open(f"{thisAnalyticsPath}/poses/{i}.txt", "w") as f:
-                f.write(f"{poseErrors[0][0]} {poseErrors[0][1]}")
-                for pE, aE in poseErrors[1:]: f.write(f"\n{pE} {aE}")
+                f.write("\n".join(f"{pE} {aE}" for pE, aE in poseErrors))
             
             # Landmarks (agg)
             ldmkErrorSums.append(sum(closestLdmksToMap))
@@ -163,8 +173,8 @@ def callback(msg: String):
 
             # Landmarks (individual)
             with open(f"{thisAnalyticsPath}/ldmks/{i}.txt", "w") as f:
-                f.write(f"{closestLdmksToMap[0]}")
-                for d in closestLdmksToMap[1:]: f.write(f"\n{d}")
+                f.write("\n".join(map(str, closestLdmksToMap)))
+
             numUpdates += 1
         
         poseAggFile.close()
@@ -195,8 +205,15 @@ def callback(msg: String):
 # PREP #
 ########
 
-# Get output directory
 rospy.init_node('eval_raw_SLAM', anonymous=True)
+aggAnalyticsPath = f"{RosPack().get_path('urquhart')}/agg_analytics/"
+if not os.path.isdir(aggAnalyticsPath):
+    print('Creating "agg_analytics" directory.')
+    os.mkdir(aggAnalyticsPath)
+aggAnalyticsPath += rospy.get_param("/outputDirName", "test")
+isGivenMap = rospy.get_param("/givenMap", False)
 rospy.Subscriber("graph_builder/doneFlag", String, callback)
 rospy.spin()
+superDF.to_string(f"{aggAnalyticsPath}.txt")
+
 
