@@ -29,7 +29,6 @@ graph_builder:
   ransacAssocNetThresh: 2.5       # rho
                                   # (this should be a little below the average distance between nearest neighbor trees)
   ransacMatchRatio: 0.9           # beta
-  maxSensorRange: 40              # r
   minFilteredAssocForValidKf: 6   # mu
 
 

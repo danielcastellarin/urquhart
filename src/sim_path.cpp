@@ -132,7 +132,6 @@ void Path::resetPath() {
     currentObsIdx = 0;
     distance = 0;
     odomPose = Pose();
-    givenInitialPose = false;
 }
 
 
@@ -213,6 +212,9 @@ int main(int argc, char **argv) {
             if (isDebug) std::cout << "   Done!" << std::endl;
         }
 
+        // Sleep for a little to allow other nodes to initialize
+        ros::Duration(10).sleep();
+
         // Find a starting location and observe the environment
         if (robotPath->validateStartingPose(isDebug)) {
             if (isDebug) std::cout << "Robot will follow a " << cfg.pathType << " path starting at pose (x y theta): " << robotPath->globalPose.printPose() << "\n";
@@ -276,7 +278,10 @@ int main(int argc, char **argv) {
             --numRuns;
         }
         if (isDebug) std::cout << "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++" << std::endl;
-        robotPath->resetPath();
+        cfg.givenStartPose = false;
+        if (cfg.pathType == "square") robotPath = new SquarePath(cfg);
+        else if (cfg.pathType == "triangle") robotPath = new TrianglePath(cfg);
+        else robotPath->resetPath();
     }
 
     // Signal downstream processes to shutdown

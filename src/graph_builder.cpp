@@ -126,8 +126,7 @@ struct PLEdge {
 
 
 
-std::shared_ptr<urquhart::Observation> initialMap = NULL;
-std::vector<LandmarkNode> initialMapLandmarkNodes;
+Points initialLandmarks;
 struct SLAMGraph {
     std::shared_ptr<urquhart::Observation> geoHier = NULL;
     Eigen::VectorXd stateVector;
@@ -143,17 +142,14 @@ struct SLAMGraph {
     SLAMGraph() {}
 
     void resetGraph(bool isMapGiven) {
-        // TODO resetGraph should not be run if node is live!
-        // TODO reassign initial map if map given (move shared pointer if live)
-        // TODO reassign landmark node list if initial map given
-        if (isMapGiven) {
-            geoHier = std::make_shared<urquhart::Observation>(*initialMap);
-            landmarkNodeList = initialMapLandmarkNodes;
-        } else {
-            geoHier = NULL;
-            landmarkNodeList.clear();
-        }
         poseNodeList.clear();
+        landmarkNodeList.clear();
+        if (isMapGiven) {
+            Points landmarks = initialLandmarks;
+            urquhart::Observation globalMap(landmarks);
+            geoHier = std::make_shared<urquhart::Observation>(std::move(globalMap));
+            for (int i = 0; i < landmarks.cols(); ++i) addLandmarkNode(i);
+        } else geoHier = NULL;
         stateVector.resize(0); // clear state vector
         ppEdges.clear();
         plEdges.clear();
@@ -498,8 +494,12 @@ struct SLAMGraph {
         
         // Output Nodes
         for (const auto& pn : poseNodeList) nodesOut << "P" << pn.id << " " << pn.pose.transpose() << std::endl;
-        for (const auto& ln : landmarkNodeList) nodesOut << "L" << ln.globalReprIdx << " " << geoHier->landmarks.col(ln.globalReprIdx).transpose() << std::endl;
-        // TODO ignore landmark nodes if svID = -1 (landmark unobserved so far)
+        // for (const auto& ln : landmarkNodeList) nodesOut << "L" << ln.globalReprIdx << " " << geoHier->landmarks.col(ln.globalReprIdx).transpose() << std::endl;
+        // FIXME when using predefined map, commented line above is wrong (saves wrong landmark data to files)
+        for (int i = 0; i < landmarkNodeList.size(); ++i) {
+            if (landmarkNodeList[i].stateVectorIdx != -1)
+                nodesOut << "L" << i << " " << geoHier->landmarks.col(i).transpose() << std::endl;
+        }
 
         // Output Edges
         for (const auto& ppe : ppEdges) edgesOut << "P" << ppe.src << " P" << ppe.dst << " " << ppe.distance.transpose() << std::endl;
@@ -678,7 +678,7 @@ ros::Publisher graphPub, hierPub, donePub;
 std::string outputPath, startingMap;
 
 // Parameters for keyframe-global polygon matching
-double polyMatchThresh, polyMatchThreshStep, reqMatchedPolygonRatio;
+double polyMatchThresh, polyMatchThreshStep, polyMatchThreshEnd, reqMatchedPolygonRatio;
 int numSideBoundsForMatch; 
 
 // Parameters for association filtering (my "RANSAC")
@@ -828,12 +828,11 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
         // Attempt to match the current local observation with the global representation
         double matchingThresh = polyMatchThresh;
         std::vector<std::pair<Eigen::Index, Eigen::Index>> matchingPointIndices;
-        int maxIter = 100, numIt = 0;
         do {
             // matchingPointIndices = matching::hierarchyIndexMatching(localObs, *g.geoHier, matchingThresh, numSideBoundsForMatch, reqMatchedPolygonRatio);
             matchingPointIndices = matching::nonGreedyHierarchyIndexMatching(localObs, *g.geoHier, matchingThresh, numSideBoundsForMatch, reqMatchedPolygonRatio);
             matchingThresh += polyMatchThreshStep;
-        } while (matchingPointIndices.size() < ransacMatchPrereq && ++numIt < maxIter);
+        } while (matchingPointIndices.size() < ransacMatchPrereq && matchingThresh <= polyMatchThreshEnd);
 
         // Exit early if we couldn't find matches within a reasonable amount of time
         if (matchingPointIndices.size() < ransacMatchPrereq) {
@@ -1167,7 +1166,7 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
 
     // Save global map state to files (for debugging)
     if (isLogging) {
-        writeHierarchyFiles(*g.geoHier, outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
+        if (startingMap.empty()) writeHierarchyFiles(*g.geoHier, outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
         g.writeGraphToFiles(outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
         // g.saveGlobalError(outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
     }
@@ -1254,12 +1253,12 @@ void keyframesReady(const std_msgs::String::ConstPtr& msg) {
         donePub.publish(doneMsg);
         ros::shutdown();
     } else {
-        g.resetGraph(!!initialMap);
         outputPath = msg->data;
         buildGlobalMap(msg->data+"/keyframe");
         donePub.publish(msg);
         unresolvedLandmarks.clear();
         activeObsWindow.clear();
+        g.resetGraph(!startingMap.empty());
     }
 }
 
@@ -1293,6 +1292,7 @@ int main(int argc, char **argv) {
     // Hierarchy matching parameters
     polyMatchThresh = n.param("polyMatchThreshStart", 5.0);
     polyMatchThreshStep = n.param("polyMatchThreshStep", 1.0);
+    polyMatchThreshEnd = n.param("polyMatchThreshEnd", 10.0);
     numSideBoundsForMatch = n.param("numSideBoundsForMatch", 3);
     reqMatchedPolygonRatio = n.param("reqMatchedPolygonRatio", 0.5); // 0.0 disables this feature
     
@@ -1336,14 +1336,16 @@ int main(int argc, char **argv) {
             infile.close();
             
             // Add landmarks to graph
-            Points landmarks(2, intake.size());
+            initialLandmarks.resize(2, intake.size());
             for (int i = 0; i < intake.size(); ++i) {
-                landmarks.col(i) = intake[i];
-                initialMapLandmarkNodes.push_back(LandmarkNode(i, -1));
+                initialLandmarks.col(i) = intake[i];
+                g.addLandmarkNode(i);
             }
             // Save global geometric hierarchy
-            if (intake.size() > 0) initialMap = std::make_shared<urquhart::Observation>(urquhart::Observation(landmarks));
-            else std::cout << "'" << startingMap << "' did not contain a valid map, ignoring..." << std::endl;
+            if (intake.size() > 0) {
+                urquhart::Observation globalMap(initialLandmarks);
+                g.geoHier = std::make_shared<urquhart::Observation>(std::move(globalMap));
+            } else std::cout << "'" << startingMap << "' did not contain a valid map, ignoring..." << std::endl;
         } else std::cout << "Could not find map at '" << startingMap << "', ignoring..." << std::endl;
     }
 
@@ -1355,10 +1357,6 @@ int main(int argc, char **argv) {
         donePub = n.advertise<std_msgs::String>("doneFlag", 10);
         sub = n.subscribe("/keyframe_maker/doneFlag", 200, keyframesReady);
     } else {
-        if (!startingMap.empty()) {
-            g.geoHier = std::move(initialMap);
-            g.landmarkNodeList = initialMapLandmarkNodes;
-        }
         if (isRealtimeVis) {
             hierPub = n.advertise<std_msgs::String>("hierarchy", 10);
             graphPub = n.advertise<std_msgs::String>("graph", 10);

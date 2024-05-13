@@ -1,5 +1,6 @@
+#[S|M|D][c|s|t|l|f][position noise level][detection noise level][map]
 logging: true
-outputDirName: X-c11
+outputDirName: M-c11
 totalRuns: 10
 offline: true
 
@@ -31,3 +32,4 @@ graph_builder:
   # startingMap: coolForest.txt
   consoleDebug: false
   realtimeVis: false
+  maxSensorRange: 40              # r

@@ -38,7 +38,7 @@ ros::Publisher kfpub, bigCloudPub, hierPub, donePub;
 
 std::vector<ObsRecord> unassociatedObs;
 std::set<ObsRecord> kfObs;
-int maxKeyframeWidth, numSkippedFramesBeforeSend, numSideBoundsForMatch, reqMatchesForFrameAssoc;
+int maxKeyframeWidth, numSkippedFramesBeforeSend, numSideBoundsForMatch, reqMatchesForFrameAssoc, minClusterSize, maxClusterSize;
 double polygonMatchThresh, reqMatchedPolygonRatio, validPointMatchThresh, clusterTolerance;
 bool isDebug, isIndivFramePub, pubAllPoints, isLogging, isOffline;
 std::string keyframePath, allKfPtsPath;
@@ -287,9 +287,9 @@ void parse2DPC(const int frameID, const pcl::PointCloud<pcl::PointXY>& localClou
         // Combine them --> do standard clustering/point association
         pcl::EuclideanClusterExtraction<pcl::PointXYZ> ece;
         ece.setInputCloud(bigPcPtr);
-        ece.setClusterTolerance(clusterTolerance);  // Set the spatial cluster tolerance (in meters)
-        ece.setMinClusterSize(2);                   // Don't make a cluster for a single stray point 
-        ece.setMaxClusterSize(maxKeyframeWidth);
+        ece.setClusterTolerance(clusterTolerance);
+        ece.setMinClusterSize(minClusterSize);
+        ece.setMaxClusterSize(maxClusterSize);
         std::vector<pcl::PointIndices> cluster_indices;
         ece.extract(cluster_indices);
 
@@ -405,17 +405,21 @@ int main(int argc, char **argv) {
     numSkippedFramesBeforeSend = n.param("numSkippedFramesBeforeSend", 3);
     reqMatchesForFrameAssoc = n.param("reqMatchesForFrameAssoc", 2);
     if (reqMatchesForFrameAssoc < 2) reqMatchesForFrameAssoc = 2;
+    minClusterSize = n.param("minClusterSize", 2);
+    if (minClusterSize <= 0) minClusterSize = 2;
+    maxClusterSize = n.param("maxClusterSize", maxKeyframeWidth);
+    if (maxClusterSize <= 0) minClusterSize = maxKeyframeWidth;
 
     // doubles
     polygonMatchThresh = n.param("polygonMatchThresh", 3.0);
     reqMatchedPolygonRatio = n.param("reqMatchedPolygonRatio", 0.5); // 0.0 disables this feature
     validPointMatchThresh = n.param("validPointMatchThresh", 1.0);
-    clusterTolerance = n.param("clusterTolerance", 0.1);
+    clusterTolerance = n.param("clusterTolerance", 1.0);
 
     ros::Subscriber sub;
     if (isOffline) {
         donePub = n.advertise<std_msgs::String>("doneFlag", 20);
-        sub = n.subscribe("/sim_path/doneFlag", 25, observationsReady);
+        sub = n.subscribe("/sim_path/doneFlag", 50, observationsReady);
     } else {
         std::string absolutePackagePath = ros::package::getPath("urquhart"), outputPath;
         n.param<std::string>("/outputDirName", outputPath, "testOutput");

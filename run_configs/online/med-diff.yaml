@@ -29,5 +29,5 @@ keyframe_maker:
 graph_builder:
   # UNCOMMENT TO USE PROVIDE MAP
   # startingMap: coolForest.txt
-  consoleDebug: false
+  consoleDebug: true
   realtimeVis: true

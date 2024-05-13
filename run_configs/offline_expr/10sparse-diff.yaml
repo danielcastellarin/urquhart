@@ -1,0 +1,34 @@
+logging: true
+outputDirName: sparse-c34
+totalRuns: 10
+offline: true
+
+sim_path:
+  forestFile: sparseForest.txt
+  pathType: circle
+  distanceToTravel: 200
+  distanceBetweenObservations: 0.20
+  observationRange: 40
+  collisionRadius: 0.3
+  successfulObservationProbability: 0.80
+  treePositionStandardDeviation: 0.3
+  favorableSpawns: true
+  # pubRate: 5
+  # randomSeed: 17
+  debug: false
+  # startPoseX: -50
+  # startPoseY: -50
+  # startPoseTheta: 0
+
+
+keyframe_maker:
+  debug: false
+  indivFramePub: false
+  pubAllPoints: true
+
+graph_builder:
+  # UNCOMMENT TO USE PROVIDE MAP
+  # startingMap: sparseForest.txt
+  consoleDebug: false
+  realtimeVis: false
+  maxSensorRange: 40              # r

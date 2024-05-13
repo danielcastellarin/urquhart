@@ -4,7 +4,7 @@ totalRuns: 10
 offline: true
 
 sim_path:
-  forestFile: coolForest.txt
+  forestFile: sparseForest.txt
   pathType: circle
   distanceToTravel: 200
   distanceBetweenObservations: 0.20
@@ -28,6 +28,7 @@ keyframe_maker:
 
 graph_builder:
   # UNCOMMENT TO USE PROVIDE MAP
-  # startingMap: coolForest.txt
+  # startingMap: sparseForest.txt
   consoleDebug: false
   realtimeVis: false
+  maxSensorRange: 40              # r

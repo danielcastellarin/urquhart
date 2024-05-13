@@ -31,3 +31,4 @@ graph_builder:
   # startingMap: coolForest.txt
   consoleDebug: false
   realtimeVis: false
+  maxSensorRange: 40              # r

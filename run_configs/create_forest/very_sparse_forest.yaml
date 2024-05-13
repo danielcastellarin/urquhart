@@ -1,0 +1,5 @@
+forestSize: 1000
+treeSpacing: 11
+noiseMean: 0
+noiseStdDev: 4.5
+forestName: verySparseForest

@@ -1,0 +1,33 @@
+logging: true
+outputDirName: dense-c34
+totalRuns: 1
+offline: false
+
+sim_path:
+  forestFile: denseForest.txt
+  pathType: circle
+  distanceToTravel: 200
+  distanceBetweenObservations: 0.10
+  observationRange: 40
+  collisionRadius: 0.3
+  successfulObservationProbability: 0.80
+  treePositionStandardDeviation: 0.3
+  favorableSpawns: true
+  pubRate: 2
+  randomSeed: 17
+  debug: false
+  # startPoseX: -50
+  # startPoseY: -50
+  # startPoseTheta: 0
+
+
+keyframe_maker:
+  debug: false
+  indivFramePub: false
+  pubAllPoints: true
+
+graph_builder:
+  # UNCOMMENT TO USE PROVIDE MAP
+  # startingMap: denseForest.txt
+  consoleDebug: true
+  realtimeVis: true
