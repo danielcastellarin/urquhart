@@ -4,14 +4,104 @@ import os
 import math
 import time
 import pandas as pd
+# import matplotlib
+# matplotlib.use('GTK3Agg')
 
 import rospy
 from rospkg import RosPack
 from std_msgs.msg import String
+# import matplotlib.pyplot as plt
 
 dfCols = ["Name", "# RP", "RPE", "ROE", "# Unique Landmarks", "LPE"]
+runtimeCols = ["Frame", "Local GH", "Polygon Matching", "TF Estimation", "Landmark Discovery", "Graph Structure", "Graph Update", "Postprocess"]
 superDF = pd.DataFrame(columns=dfCols)
+runtimeDF = pd.DataFrame(columns=runtimeCols)
 isGivenMap = False
+
+class TimingData:
+    def __init__(self, runCode, localGHTime, newMapTime, polyMatchTime, \
+            tfEstTime, ldmkDiscTime, updateGraphStructTime, \
+                graphUpdateTime, postProcessTime) -> None:
+        self.code = runCode
+        self.localGH = localGHTime
+        self.newMap = newMapTime
+        self.polyMatch = polyMatchTime
+        self.tfEst = tfEstTime
+        self.ldmkDisc = ldmkDiscTime
+        self.updateGraphStruct = updateGraphStructTime
+        self.graphUpdate = graphUpdateTime
+        self.postProcess = postProcessTime
+
+def gatherTimingData(outputPath: str, analyticsPath: str):
+    timings = {}
+    runtimeDF = pd.DataFrame(columns=runtimeCols)
+    for line in open(outputPath+"/global/!timings.txt"):
+        data = line.strip('\n')
+        if not line: continue
+        # print(data)
+        frameID, runCode, localGHTime, newMapTime, polyMatchTime, \
+            tfEstTime, ldmkDiscTime, updateGraphStructTime, \
+                graphUpdateTime, postProcessTime = tuple(map(int, data.split("|")))
+        timings[frameID-1] = (runCode, localGHTime, newMapTime, polyMatchTime, tfEstTime, ldmkDiscTime, updateGraphStructTime, graphUpdateTime, postProcessTime)
+        dfRow = [frameID, localGHTime, polyMatchTime]
+        dfRow.append(tfEstTime if runCode != 1 else None)
+        dfRow += [ldmkDiscTime, updateGraphStructTime, graphUpdateTime] if runCode != 2 else [None, None, None]
+        dfRow.append(postProcessTime if runCode != 3 else None)
+        runtimeDF.loc[runtimeDF.shape[0]+1] = dfRow
+
+    runtimeDF.to_string(f"{analyticsPath}/!runtimes.txt", index=False)
+
+    ghTimesX = []
+    ghTimesY = []
+    polyMatchTimeX = []
+    polyMatchTimeY = []
+    tfEstX = []
+    tfEstY = []
+    ldmkDiscX = []
+    ldmkDiscY = []
+    graphStructX = []
+    graphStructY = []
+    graphUpdateX = []
+    graphUpdateY = []
+    postprocessX = []
+    postprocessY = []
+
+    for frameID, (code, gh, newmap, polyMatch, tfEst, ldmkDisc, graphStruct, graphUpdate, postprocess) in timings.items():
+        ghTimesX.append(frameID)
+        ghTimesY.append(gh)
+        polyMatchTimeX.append(frameID)
+        polyMatchTimeY.append(polyMatch)
+        if code != 1:
+            tfEstX.append(frameID)
+            tfEstY.append(tfEst)
+        if code != 2:
+            ldmkDiscX.append(frameID)
+            ldmkDiscY.append(ldmkDisc)
+            graphStructX.append(frameID)
+            graphStructY.append(graphStruct)
+            graphUpdateX.append(frameID)
+            graphUpdateY.append(graphUpdate)
+        if code != 3:
+            postprocessX.append(frameID)
+            postprocessY.append(postprocess)
+
+
+    # fig = plt.figure(1)
+    # plt.plot(ghTimesX, ghTimesY, label="Local GH")
+    # plt.show()
+    # fig.plot(polyMatchTimeX, polyMatchTimeY, label="Polygon Matching")
+    # fig.plot(tfEstX, tfEstY, label="TF Estimation")
+    # fig.plot(ldmkDiscX, ldmkDiscY, label="Ldmk Discovery")
+    # fig.plot(graphStructX, graphStructY, label="Graph Structure")
+    # fig.plot(graphUpdateX, graphUpdateY, label="Graph Update")
+    # fig.plot(postprocessX, postprocessY, label="Postprocessing")
+    # fig.legend(loc="upper left")
+    # fig.savefig(f"{analyticsPath}/!runtimes.png", bbox_inches='tight')
+    # plt.close(fig)
+    # f = open(f"{analyticsPath}/!gh.txt", )
+    
+    return timings
+    
 
 def gatherRunData(outputPath: str, hasGlobalMap = False):
     # Record which ground truth observation each keyframe as its base frame
@@ -142,6 +232,7 @@ def callback(msg: String):
             os.mkdir(thisAnalyticsPath)
         poseAggFile = prepAnalyticType(thisAnalyticsPath, runName, "pose")
         ldmkAggFile = prepAnalyticType(thisAnalyticsPath, runName, "ldmk")
+        runtimes = gatherTimingData(thisOutputPath, thisAnalyticsPath)
 
 
         # Aggregate analytic data

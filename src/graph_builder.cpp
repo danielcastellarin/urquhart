@@ -19,6 +19,7 @@
 #include <pcl/common/transforms.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <std_msgs/String.h>
+// #include <std_msgs/Float32.h>
 
 #include <ros/ros.h>
 #include <ros/package.h>
@@ -675,7 +676,9 @@ std::map<int, Points> activeObsWindow;
 // Output options (screen, logs, realtime)
 bool isConsoleDebug = false, isLogging = false, isRealtimeVis = false;
 ros::Publisher graphPub, hierPub, donePub;
+// ros::Publisher timingPub;
 std::string outputPath, startingMap;
+std::chrono::milliseconds localGHTime, newMapTime, polyMatchTime, tfEstTime, ldmkDiscTime, updateGraphStructTime, graphUpdateTime, postProcessTime;
 
 // Parameters for keyframe-global polygon matching
 double polyMatchThresh, polyMatchThreshStep, polyMatchThreshEnd, reqMatchedPolygonRatio;
@@ -694,6 +697,34 @@ int newGraphErrorThresh;
 std::unordered_map<PointRef, AssocSet, hash_pair> unresolvedLandmarksCopy;
 bool wasLastFrameRolledBack = false;
 
+void publishTimingInfo(int keyframeID, int runCode) {
+    std::stringstream timingStream;
+
+    timingStream << keyframeID << "|";
+    // Run Code : 0 = success, 1 = match failure, 2 = assoc failure, 3 = graph update failure
+    timingStream << runCode << "|" << localGHTime.count() << "|" << newMapTime.count() << "|" 
+    << polyMatchTime.count() << "|" << tfEstTime.count() << "|" << ldmkDiscTime.count() << "|" 
+    << updateGraphStructTime.count() << "|" << graphUpdateTime.count() << "|" << postProcessTime.count();
+
+    // Construct graph message and publish
+    // std_msgs::String timingMsg;
+    // timingMsg.data = timingStream.str();
+    // timingPub.publish(timingMsg);
+
+    std::ofstream timingOut(outputPath+"/global/!timings.txt", std::ios_base::app);
+    timingOut << timingStream.str() << std::endl;
+    timingOut.close();
+}
+void zeroTimings() {
+    localGHTime = std::chrono::milliseconds::zero();
+    newMapTime = std::chrono::milliseconds::zero();
+    polyMatchTime = std::chrono::milliseconds::zero();
+    tfEstTime = std::chrono::milliseconds::zero();
+    ldmkDiscTime = std::chrono::milliseconds::zero();
+    updateGraphStructTime = std::chrono::milliseconds::zero();
+    graphUpdateTime = std::chrono::milliseconds::zero();
+    postProcessTime = std::chrono::milliseconds::zero();
+}
 
 
 // @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
@@ -727,6 +758,7 @@ void deleteTreeAssoc(std::unordered_map<PointRef, AssocSet, hash_pair>& map, Poi
 
 void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& localCloud) {
     if (isConsoleDebug) std::cout << "Received keyframe " << frameID << std::endl;
+    zeroTimings();
 
     // Remember the state of the graph before this keyframe in case we need to do a rollback
     // #SV space added = 2 * #landmarks init + 3 (the pose)
@@ -734,7 +766,7 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
     if (localCloud.size() < 3) {
         if (isConsoleDebug) {
             std::cout << "Keyframe does not contain enough points to construct triangulation, discarding...\n";
-            std::cout << "===============================================================" << std::endl;
+            std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << std::endl;
         }
         if (isLogging) logDroppedFrame(outputPath+"/global", frameID);
         return;
@@ -744,7 +776,11 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
     Points vectorOfTrees(2, localCloud.size());
     int idx = 0;
     for (const auto& p : localCloud) vectorOfTrees.col(idx++) = PtLoc{p.x, p.y};
+
+    auto t1 = std::chrono::high_resolution_clock::now();
     urquhart::Observation localObs(vectorOfTrees);
+    auto t2 = std::chrono::high_resolution_clock::now();
+    localGHTime = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
 
     // Save local observation data (if desired)
     if (isConsoleDebug) std::cout << "Defined local observation for keyframe " << frameID << " with " << vectorOfTrees.cols() << " observed trees." << std::endl;
@@ -766,6 +802,7 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
         //      maybe I could modify the matching procedure a bit to iteratively loosen the matching constraints if not enough matches are found?
 
         // Assign the graph's Observation to the current local one
+        t1 = std::chrono::high_resolution_clock::now();
         g.geoHier = std::make_shared<urquhart::Observation>(std::move(localObs));
 
         // Add robot pose (as an anchor)
@@ -778,6 +815,8 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
             g.addLandmarkNode(lIdx, position);
             g.addPLEdge(lIdx, position);
         }
+        t2 = std::chrono::high_resolution_clock::now();
+        newMapTime = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
 
         if (isConsoleDebug) {
             std::cout << "Constructed initial global geometric hierarchy " << frameID << std::endl;
@@ -826,6 +865,7 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
         // if not enough matches are made, maybe drop the frame? or expand global polygon election range
 
         // Attempt to match the current local observation with the global representation
+        t1 = std::chrono::high_resolution_clock::now();
         double matchingThresh = polyMatchThresh;
         std::vector<std::pair<Eigen::Index, Eigen::Index>> matchingPointIndices;
         do {
@@ -833,6 +873,8 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
             matchingPointIndices = matching::nonGreedyHierarchyIndexMatching(localObs, *g.geoHier, matchingThresh, numSideBoundsForMatch, reqMatchedPolygonRatio);
             matchingThresh += polyMatchThreshStep;
         } while (matchingPointIndices.size() < ransacMatchPrereq && matchingThresh <= polyMatchThreshEnd);
+        t2 = std::chrono::high_resolution_clock::now();
+        polyMatchTime = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
 
         // Exit early if we couldn't find matches within a reasonable amount of time
         if (matchingPointIndices.size() < ransacMatchPrereq) {
@@ -840,7 +882,10 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
                 std::cout << "Dropping keyframe " << frameID << " because no matches could be found." << std::endl;
                 std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << std::endl;
             }
-            if (isLogging) logDroppedFrame(outputPath+"/global", frameID);
+            if (isLogging) {
+                logDroppedFrame(outputPath+"/global", frameID);
+                publishTimingInfo(frameID, 1);
+            }
             return;
         }
 
@@ -864,6 +909,7 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
         std::unordered_map<Eigen::Index, GlobalPt> goodAssociationMap;
         Eigen::Vector3d bestGlobalRobotPose;
         std::vector<GlobalPt> unmatchedGlobalPoints;
+        t1 = std::chrono::high_resolution_clock::now();
         if (!estimateBestTf(localObs.landmarks,
                             g.geoHier->landmarks, 
                             matchingPointIndices, 
@@ -876,13 +922,20 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
                             ransacAssocNetThresh,
                             ransacMatchRatio,
                             maxSensorRange)) {
+            t2 = std::chrono::high_resolution_clock::now();
+            tfEstTime = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
             if (isConsoleDebug) {
                 std::cout << "Dropping keyframe " << frameID << " because all potential matches could not be verified." << std::endl;
                 std::cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << std::endl;
             }
-            if (isLogging) logDroppedFrame(outputPath+"/global", frameID);
+            if (isLogging) {
+                logDroppedFrame(outputPath+"/global", frameID);
+                publishTimingInfo(frameID, 2);
+            }
             return;
         }
+        t2 = std::chrono::high_resolution_clock::now();
+        tfEstTime = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
 
         // LOG FINAL ASSOCIATIONS
         if (isLogging) { // TODO save the final associations and new landmarks so the visualization can color them differently
@@ -904,12 +957,14 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
         }
 
 
-        // %%%%%%%%%%%%%%%%%%%%%
-        // Association Filtering
-        // %%%%%%%%%%%%%%%%%%%%%
+        // %%%%%%%%%%%%%%%%%%
+        // Landmark Discovery
+        // %%%%%%%%%%%%%%%%%%
         
         // Remember the state of the association network 
         if (!wasLastFrameRolledBack) unresolvedLandmarksCopy = unresolvedLandmarks;
+
+        t1 = std::chrono::high_resolution_clock::now();
 
         // Store both the local and global positions of unmatched landmarks
         // idx 0,n = global; n+1,2n = local
@@ -1022,6 +1077,8 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
             }
         }
         activeObsWindow[g.poseNodeList.size()] = keyframePoints;
+        t2 = std::chrono::high_resolution_clock::now();
+        ldmkDiscTime = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
 
 
         // %%%%%%%%%%%%%%%%
@@ -1031,6 +1088,7 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
         std::vector<int> existingLdmkIds, newLdmkIds, initLdmkIdxs;
         int ogStateVectorLength = g.stateVector.size(), ogPLEdgeLength = g.plEdges.size(), ogLandmarkCount = g.landmarkNodeList.size();
 
+        t1 = std::chrono::high_resolution_clock::now();
         // Define a new node and edge for the robot's estimated odometry
         if (g.poseNodeList.size() > 0) g.addPPEdge(bestGlobalRobotPose);
         else g.addPoseNode(bestGlobalRobotPose);
@@ -1054,6 +1112,8 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
                 g.addPLEdge(poseNodeIdx, newId, activeObsWindow[poseNodeIdx].col(pointSetSize + ldmkRefIdx));
             }
         }
+        t2 = std::chrono::high_resolution_clock::now();
+        updateGraphStructTime = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
 
         if (isRealtimeVis && g.geoHier->landmarks.cols() < 1000) {
             // Publish graph state before optimization
@@ -1087,11 +1147,17 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
 
         // Optimize the graph once
         if (isConsoleDebug) std::cout << "Beginning graph optimization..." << std::endl;
+        t1 = std::chrono::high_resolution_clock::now();
         wasLastFrameRolledBack = !g.optimizeGraph(ogStateVectorLength, ogPLEdgeLength, ogLandmarkCount, initLdmkIdxs, isConsoleDebug, newGraphErrorThresh);
+        t2 = std::chrono::high_resolution_clock::now();
+        graphUpdateTime = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
         if (wasLastFrameRolledBack) {  // TODO what if I did two sequential optimizations here?
             unresolvedLandmarks = unresolvedLandmarksCopy;
             activeObsWindow.erase(g.poseNodeList.size()); // last pose node has already been popped from list
-            if (isLogging) logDroppedFrame(outputPath+"/global", frameID);
+            if (isLogging) {
+                logDroppedFrame(outputPath+"/global", frameID);
+                publishTimingInfo(frameID, 3);
+            }
             return;
         }
         if (isConsoleDebug) {
@@ -1104,6 +1170,8 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
         // %%%%%%%%%%%%%%%%%
         // Global Map Upkeep    (TODO improve geometric hierarchy update)
         // %%%%%%%%%%%%%%%%%
+
+        t1 = std::chrono::high_resolution_clock::now();
 
         // Overwrite or amend the geometric hierarchy depending on whether new landarks were found
         if (newlyEstablishedLandmarkObservations.size() > 0) {
@@ -1126,6 +1194,9 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
             }
             activeObsWindow.erase(activeObsWindow.begin()); // Remove the oldest observation from our active window
         }
+
+        t2 = std::chrono::high_resolution_clock::now();
+        postProcessTime = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
 
         
         // %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1167,8 +1238,16 @@ void constructGraph(const int frameID, const pcl::PointCloud<pcl::PointXY>& loca
     // Save global map state to files (for debugging)
     if (isLogging) {
         if (startingMap.empty()) writeHierarchyFiles(*g.geoHier, outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
+        // else {
+        //     int numPolysGlobal = g.geoHier->hier->getChildrenIds(0).size();
+        //     int numPolysLocal = localObs.hier->getChildrenIds(0).size();
+        //     std::ofstream howManyPolys(outputPath+"/global/!numPolys.txt", std::ios_base::app);
+        //     howManyPolys << numPolysLocal << " " << numPolysGlobal << std::endl;
+        //     howManyPolys.close();
+        // }
         g.writeGraphToFiles(outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
         // g.saveGlobalError(outputPath+"/global", std::to_string(g.poseNodeList.size())+".txt");
+        publishTimingInfo(frameID, 0);
     }
 
     // Serialize geometric hierarchy for real-time visualization
@@ -1356,6 +1435,7 @@ int main(int argc, char **argv) {
     if (isOffline) {
         donePub = n.advertise<std_msgs::String>("doneFlag", 10);
         sub = n.subscribe("/keyframe_maker/doneFlag", 200, keyframesReady);
+        // timingPub = n.advertise<std_msgs::String>("runtime", 10);
     } else {
         if (isRealtimeVis) {
             hierPub = n.advertise<std_msgs::String>("hierarchy", 10);
