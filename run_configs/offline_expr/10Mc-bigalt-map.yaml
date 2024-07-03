@@ -1,19 +1,20 @@
 #[S|M|D][c|s|t|l|f][position noise level][detection noise level][map]
 logging: true
-outputDirName: M-c06-34
+outputDirName: B-c22-34-map-alt
 totalRuns: 10
 offline: true
-givenMap: false
+givenMap: true
 
 sim_path:
-  forestFile: coolForest.txt
+  forestFile: bigUrqForest.txt
+  # forestFile: coolForest.txt
   pathType: circle
   distanceToTravel: 200
-  distanceBetweenObservations: 0.10
+  distanceBetweenObservations: 0.20
   observationRange: 40
   collisionRadius: 0.3
-  successfulObservationProbability: 0.70
-  treePositionStandardDeviation: 0.0
+  successfulObservationProbability: 0.9
+  treePositionStandardDeviation: 0.2
   favorableSpawns: true
   # pubRate: 5
   # randomSeed: 17
@@ -31,6 +32,7 @@ keyframe_maker:
 graph_builder:
   # UNCOMMENT TO USE PROVIDE MAP
   # startingMap: coolForest.txt
+  startingMap: bigUrqForest.txt
   consoleDebug: false
   realtimeVis: false
   maxSensorRange: 40              # r

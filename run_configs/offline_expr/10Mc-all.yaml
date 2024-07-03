@@ -1,23 +1,24 @@
 #[S|M|D][c|s|t|l|f][position noise level][detection noise level][map]
 logging: true
-outputDirName: MB-c22-34
+outputDirName: P-s00-34
 totalRuns: 10
 offline: true
 givenMap: false
 
 sim_path:
-  forestFile: bigUrqForest.txt
-  pathType: circle
-  distanceToTravel: 1000
+  # forestFile: bigUrqForest.txt
+  forestFile: coolForest.txt
+  pathType: square
+  distanceToTravel: 200
   distanceBetweenObservations: 0.20
   observationRange: 40
   collisionRadius: 0.3
-  successfulObservationProbability: 0.90
-  treePositionStandardDeviation: 0.2
+  successfulObservationProbability: 0.85
+  treePositionStandardDeviation: 0.0
   favorableSpawns: true
   # pubRate: 5
   # randomSeed: 17
-  debug: true
+  debug: false
   # startPoseX: -50
   # startPoseY: -50
   # startPoseTheta: 0

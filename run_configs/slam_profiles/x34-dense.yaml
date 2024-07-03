@@ -1,0 +1,40 @@
+keyframe_maker:
+  maxKeyframeWidth: 10            # n
+  numSkippedFramesBeforeSend: 3   # f
+
+  polygonMatchThresh: 10          # tau
+  numSideBoundsForMatch: 4        # Theta_N
+  reqMatchedPolygonRatio: 0.6     # eta
+  validPointMatchThresh: .75      # lambda
+  reqMatchesForFrameAssoc: 8      # gamma
+  
+  clusterTolerance: 0.75          # sigma
+                                  # The radius for the clustering algorithm to perform k-NN searching (used to find its candidate points)
+
+
+graph_builder:
+  polyMatchThreshStart: 2.0       # tau
+                                  # Tight polygon match threshold
+  polyMatchThreshStep: 0.5        # psi
+  numSideBoundsForMatch: 3        # Theta_N
+  reqMatchedPolygonRatio: 0.5     # eta
+  
+
+  ransacMaxIter: 75               # alpha
+  ransacMatchPrereq: 16           # gamma
+                                  # (relatively high, we want a lot of matches to sample from)
+  ransacMatchSampleSize: 2        # xi
+                                  # (low as possible, want each sample to have low probability to have poor match affecting TF)
+  ransacValidAssocThresh: .10     # Lambda
+  ransacAssocNetThresh: 2.0       # rho
+                                  # (this should be a little below the average distance between nearest neighbor trees)
+  ransacMatchRatio: 0.9           # beta
+  minFilteredAssocForValidKf: 10  # mu
+
+
+  minAssocForNewLdmk: 5           # k
+                                  # (relatively low, we want to discover new trees fast)
+  associationWindowSize: 6        # omega
+                                  # (close to ^^, we want easily repeatable observations)
+  ptAssocThresh: 0.5              # delta
+                                  # (relatively low, we want to associate new points that we are fairly certain are the same)

@@ -31,3 +31,4 @@ graph_builder:
   # startingMap: denseForest.txt
   consoleDebug: true
   realtimeVis: true
+  maxSensorRange: 40              # r

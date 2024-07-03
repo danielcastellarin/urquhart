@@ -7,9 +7,7 @@
     <!-- <rosparam file="$(find urquhart)/run_configs/slam_profiles/x54.yaml" command="load" /> -->
     <!-- <rosparam file="$(find urquhart)/run_configs/slam_profiles/x34-dense.yaml" command="load" /> -->
     
-    <rosparam file="$(find urquhart)/run_configs/offline_expr/10Mc-all.yaml" command="load" />
-    <!-- <rosparam file="$(find urquhart)/run_configs/offline_expr/10Mc-alt-map.yaml" command="load" /> -->
-    <!-- <rosparam file="$(find urquhart)/run_configs/online/med-diff.yaml" command="load" /> -->
+    <rosparam file="$(find urquhart)/run_configs/online/med-diff.yaml" command="load" />
     
     <!-- Simulate Robot Observations -->
     <node pkg="urquhart" type="SimPath" name="sim_path" output="screen" />
@@ -24,12 +22,12 @@
     <!-- <node pkg="urquhart" type="PolygonSLAM" name="($anon graph_builder)" output="screen" /> -->
 
     <!-- Analytics Node -->
-    <node pkg="urquhart" type="runtime_eval_SLAM.py" name="eval_raw_SLAM" output="screen" required="true" />
+    <!-- <node pkg="urquhart" type="runtime_eval_SLAM.py" name="eval_raw_SLAM" output="screen" required="true" /> -->
     <!-- <node pkg="urquhart" type="runtime_eval_SLAM.py" name="($anon eval_raw_SLAM)" output="screen" /> -->
 
 
     <!-- Visualizations -->
-    <!-- <node pkg="urquhart" type="live_truth_display.py" name="live_true" output="screen" />
+    <node pkg="urquhart" type="live_truth_display.py" name="live_true" output="screen" />
     <group ns="sim_path">
         <node pkg="urquhart" type="live_pc.py" name="pc_display" output="screen">
             <param name="topicName" value="local_points" />
@@ -43,6 +41,6 @@
             <param name="topicName" value="keyframe" />
         </node>
     </group>
-    <node pkg="urquhart" type="live_graph.py" name="graph_display" output="screen" /> -->
+    <node pkg="urquhart" type="live_graph.py" name="graph_display" output="screen" />
 
 </launch>

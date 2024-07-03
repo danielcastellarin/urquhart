@@ -86,7 +86,7 @@ target_include_directories(SimPath PUBLIC include ${catkin_INCLUDE_DIRS})
 
 
 # Garbage test program
-add_executable(Stu src/stupid.cpp)
+add_executable(Stu src/playground.cpp)
 # target_link_libraries(Stu ${qhullLibs})
 # SET_TARGET_PROPERTIES(Stu PROPERTIES COMPILE_DEFINITIONS "qh_QHpointer")
 
